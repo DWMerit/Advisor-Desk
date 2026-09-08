@@ -55,6 +55,23 @@ Not graph richness. See §11a.
 
 **On the indexes claimed to already work.** If the zero-drift claim holds, that is evidence the convention works, not evidence automation is needed. Orbit's honest role against a working index is a **cheap drift check**: run it, get the same 373 rows, learn nothing, cost nothing. The day it disagrees is the day it earned its place. Orbit never replaces, regenerates or improves an index — §18 forbids it outright.
 
+**On prior art: GitLab Orbit.** GitLab ships a context graph for AI agents (`gitlabhq/orbit-knowledge-graph`). It is the strongest existing answer to "someone has already built this", so it was installed and run rather than argued about. Measured, on their own repository:
+
+| | GitLab Orbit Local | This spec |
+|---|---|---|
+| Ontology | 36 node types, **59 edge-type definitions** | 3 node kinds, 6 edge kinds |
+| Storage | Persistent DuckDB at `~/.orbit/graph.duckdb` | None, live derivation |
+| Languages parsed | 20 — Rust, Python, Go, TS, Ruby, Bash, YAML… **not Markdown** | n/a, file-level |
+| On 1,775 Rust files | 17,669 definitions, 20,104 `CALLS` edges, 15.5 s | — |
+| On 202 Markdown files | **0 definitions**, 249 edges, all structural | 190 files, 1,800 references, 0.24 s |
+| Edges touching any `.md` file | **357, every one of them `CONTAINS`** | `references`, `loads`, `produces`, `identical-bytes` |
+| Evidence classes | none | four |
+| Load ledger | none | the core |
+
+It knows `CLAUDE.md` exists and is 17,294 bytes. It does not know that it is an instruction surface, that it loads at boot, that anything is governed by it, or that `AGENTS.md` beside it is the same file byte for byte.
+
+That is not a defect in their tool — a code graph indexes code. It settles the question this section asks: **the existing answer covers the code half of the estate and none of the governance half.** §14.1 adopts it for the half it covers, which is the largest single thing this spec gets to not build.
+
 **On matching the repo's habit.** A system whose rulebook is majority self-defence — claimed, in the prior analysis, at 9 of 17 rules about the machinery against 4 about estimating — teaches every session that arrives to produce more self-defence. Orbit cannot fix that, and must not participate in it: I10 means Orbit has no way to add to the pile even if a session wants it to.
 
 ---
@@ -362,6 +379,29 @@ Orbit maintains a **mechanism registry**: every known way repository-authored te
 | MCP server instructions | boot, automatic | **UNKNOWN**, and **outside the estate entirely** | No |
 | Files read during the session | retrieval / task-selected | Yes, per read | No |
 
+### The client dimension — amended after running on a real governance estate
+
+A ledger row is meaningless without naming **which client** activates it. The mechanisms are client-specific: Claude Code reads `CLAUDE.md`, Codex and others read `AGENTS.md`, and a repository supporting several ships all of them.
+
+Measured on GitLab's own repository:
+
+| source | bytes | activation |
+|---|---|---|
+| `AGENTS.md` | 17,294 | repo-entry |
+| `CLAUDE.md` | 17,294 | repo-entry |
+| `crates/indexer/AGENTS.md` | 15,133 | path-scoped |
+| `crates/code-graph/AGENTS.md` | 611 | path-scoped |
+| 11 × `SKILL.md` descriptions | 5,387 total | boot |
+
+`AGENTS.md` and `CLAUDE.md` are **byte-identical** — one distinct SHA-256. Summed naively the repo-entry burden is 39,975 bytes (~10,000 tokens), of which 34,588 is one document counted twice. **No single session pays that.** A Claude Code session pays ~22,700; a Codex session pays ~22,700; the 39,975 figure describes a client that does not exist.
+
+Therefore every ledger row carries a `client` field, and `cold-start` (§11a) is **always reported per client and per entry point**, never as one estate-wide number. A cross-client total may be shown only as an explicitly labelled upper bound.
+
+Two further consequences the same run exposed:
+
+- **Path-scoped surfaces belong in the cold-start figure, keyed to the entry point.** Entering that repository's root costs ~22,700 bytes for one client; opening a file under `crates/indexer/` adds a further 15,133. A single estate-wide number would have hidden a 66% increase that depends only on which directory you touch first.
+- **Byte-identity across clients is the cheapest large saving available**, and it is only visible because `identical-bytes` (§7.6) and the ledger are read together. Neither finds it alone.
+
 ### The finding that shapes the whole operating system
 
 **`revocable` is `No` for almost everything.** Once bytes are in a context window they stay for the life of that window. There is no unload.
@@ -472,6 +512,25 @@ Assembly proceeds from **explicit selection**, never from inferred relevance:
 ### The hard rule at this boundary
 
 **The assembler loads the source file. It never loads an Orbit summary in place of the source.** Orbit hands over addresses and costs. The bytes that enter the session come from the file itself, at the moment of assembly, so they cannot be stale.
+
+### 14.1 The code layer is not built here — Orbit Local is adopted for it
+
+Function- and call-level structure ("what calls this", "what breaks if I change this") is **out of scope for this spec and satisfied off the shelf** by GitLab's Orbit Local: `orbit index .`, then SQL against a local DuckDB file. Verified working: 17,669 definitions and 20,104 `CALLS` edges from a 1,775-file Rust repository in 15.5 seconds, offline after install, no account needed at query time.
+
+The division of labour, and it is clean:
+
+| Question | Answered by |
+|---|---|
+| What calls this function? What breaks if I change it? | **Orbit Local** |
+| What loads into a session, from where, at what cost, on what evidence? | **This spec** |
+| Which of these governs the task? | **Neither — explicit activation, plane 3** |
+
+The two do not need to be integrated, and integrating them is not proposed. They are separate commands answering separate questions over the same files. Should a session ever need both, it runs both.
+
+Two things a future reader must know before adopting it:
+
+- Orbit Local **maintains a persistent index** (`~/.orbit/graph.duckdb`). That is right for its job — parsing 17,669 definitions is expensive and worth keeping. It is not evidence that this spec should persist anything: file-level observation of the same estate took 1.6 seconds with nothing stored (§13).
+- The released binary **attempts telemetry** to a GitLab-operated collector; its config exposes a `collector_url` key. Adopting it on a private estate is therefore a decision, not a default. Recorded in §20.
 
 ### Explicitly not designed here
 
@@ -608,7 +667,9 @@ Not in the slice: `trace`, `produces` detection, `identical-bytes`, the cache, t
 7. **Whether the forbidden-vocabulary list in §9 is complete.** It is a judgement call about your own reading habits.
 8. **Whether Orbit should be built at all**, if the hand-built indexes do show zero drift when checked. The cheapest honest test is the prototype: run it once against the real estate. If it agrees with the indexes and tells you nothing you did not already know, that is a real answer and the correct response is to stop.
 9. **What "one real estimating task" means** for the cold-start count. The definition fixes the number, and it is a judgment call no tool can make.
-10. **Whether a rule removed to lower the cold-start number was doing work.** Orbit measures the number; it cannot measure the loss.
+10. **Whether to adopt Orbit Local**, given it maintains a persistent index and its released binary attempts telemetry to a GitLab-operated collector. The capability is real and verified; the data-egress question is yours.
+11. **Which clients count** for the cold-start figure. Reporting per client is settled (§10); which set of clients your estate actually runs is not, and it changes every number.
+12. **Whether a rule removed to lower the cold-start number was doing work.** Orbit measures the number; it cannot measure the loss.
 
 ---
 
