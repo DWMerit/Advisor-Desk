@@ -1,0 +1,124 @@
+# orbit/ontology/nodes/context/surface.yaml
+#
+# Mirrors config/ontology/nodes/source_code/file.yaml from
+# gitlabhq/orbit-knowledge-graph @ 0fe19ac, so this file can be overlaid onto
+# their ontology tree, or contributed upstream, unchanged.
+#
+# The indexer builds the DuckDB table from `storage.columns` below. Adding a
+# column here adds it to the table; no Python changes.
+
+node_type: Surface
+domain: context
+description: A file that can place text into an assistant session
+label: path
+default_columns: [id, path, surface_kind, size_bytes, commit_sha]
+destination_table: gl_context_surface
+sort_key: [traversal_path, project_id, branch, id]
+
+style:
+  size: 24
+  color: "#F59E0B"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_context_surface
+      key_column: id
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Git branch."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    mutable: false
+    description: "Indexed commit SHA."
+
+  path:
+    type: string
+    source: path
+    nullable: false
+    mutable: false
+    description: "Relative path within the repository."
+
+  surface_kind:
+    type: string
+    source: surface_kind
+    nullable: false
+    mutable: false
+    description: "Kind of surface (e.g. instruction-surface, skill-package, agent-definition)."
+    selectivity: low
+
+  size_bytes:
+    type: int64
+    source: size_bytes
+    nullable: false
+    mutable: false
+    description: "Uncompressed file size in bytes, measured at index time."
+
+  content:
+    type: string
+    virtual:
+      service: filesystem
+      lookup: file_content
+      depends_on: [project_id, commit_sha, branch, path]
+    nullable: true
+    description: "Raw surface text, resolved from the file at query time. Never stored."
+
+  reason:
+    type: string
+    source: reason
+    nullable: false
+    mutable: true
+    description: "Why the surface was skipped or failed to index (e.g. invalid_utf8, oversize, read_error). Empty for surfaces indexed successfully."
+    selectivity: low
+
+storage:
+  settings:
+    index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: surface_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+    - {name: reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_path, column: path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
+    - {name: idx_path_ngram, column: path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
