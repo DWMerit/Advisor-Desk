@@ -63,7 +63,8 @@ New ontology files under `nodes/context/`. Their `source_code` nodes (`File`, `D
 ### `Surface` → `gl_context_surface`
 A file that can place text into a session.
 
-`id` · `traversal_path` · `project_id` · `branch` · `commit_sha` · `path` · `surface_kind` · `client` · `activation` · `size_bytes` · `est_tokens` · `revocable` · `evidence_class` · `detector` · `reason`
+Phase 1: `id` · `traversal_path` · `project_id` · `branch` · `commit_sha` · `path` · `surface_kind` · `size_bytes` · `reason`
+Gated additions: `client` · `activation` · `revocable` (Candidate A) · `evidence_class` · `detector` (Candidate B)
 
 - `surface_kind`: `instruction-surface` | `skill-package` | `agent-definition` | `command-definition` | `hook-definition` | `mcp-config`
 - `client`: `claude` | `codex` | `cursor` | `opencode` | `any` — **not optional.** `AGENTS.md` and `CLAUDE.md` in GitLab's own repo are byte-identical at 17,294 bytes each; a client-blind sum reports 39,975 for a session that pays ~22,700.
@@ -72,13 +73,13 @@ A file that can place text into a session.
 ### `Clause` → `gl_context_clause`
 An addressable fragment within a surface — the governance analogue of `Definition`, and the reason granularity is sub-file.
 
-`id` · `traversal_path` · `branch` · `commit_sha` · `surface_path` · `fqn` · `heading` · `clause_type` · `start_line` · `end_line` · `start_byte` · `end_byte` · `evidence_class` · `detector`
+`id` · `traversal_path` · `branch` · `commit_sha` · `surface_path` · `fqn` · `heading` · `clause_type` · `start_line` · `end_line` · `start_byte` · `end_byte` (+ gated `evidence_class` · `detector`)
 
 - `fqn` mirrors theirs: `CLAUDE.md#Estimating rules#M6 anchors`.
 - `clause_type`: `heading-section` | `list-rule` | `frontmatter-field` | `code-block`
 - Segmentation is by Markdown structure. A 17 KB instruction surface is dozens of rules with different lifetimes; addressing it as one file makes "which rule" unanswerable.
 
-### `Mechanism` → `gl_context_mechanism`
+### `Mechanism` → `gl_context_mechanism` — **gated, phase 2 only (§6, Candidate A)**
 The load ledger as a table. One row per way text reaches a session.
 
 `id` · `traversal_path` · `mechanism` · `client` · `source_path` · `activation` · `trigger` (verbatim, with locator) · `scope` · `inheritance` · `bytes` · `est_tokens` · `lifetime` · `revocable` · `consumer_evidence` · `evidence_class` · `detector`
@@ -90,7 +91,7 @@ The load ledger as a table. One row per way text reaches a session.
 ### `ExternalRef` → `gl_context_external_ref`
 A pointer target not resolvable inside the indexed roots.
 
-`id` · `address` · `sub_kind` · `evidence_class` · `detector`
+`id` · `address` · `sub_kind` (+ gated `evidence_class` · `detector`)
 
 `sub_kind`: `no-indexed-target-match` | `outside-indexed-roots` | `unresolvable-scheme`. **Never merged**, and each is a statement about the detector set, not the file.
 
@@ -100,7 +101,7 @@ Written as `edges/*.yaml` with variants, routed to `gl_context_edge`.
 
 | Edge | Variants | Evidence |
 |---|---|---|
-| `LOADS` | Mechanism → Surface; Surface → Clause | mechanism registry + config |
+| `LOADS` *(gated, phase 2)* | Mechanism → Surface; Surface → Clause | mechanism registry + config |
 | `REFERENCES` | Surface → File · Surface → Surface · Clause → Surface · Surface → ExternalRef | markdown-link, frontmatter-field, config-value, bare-path, import-statement, supersedes-claim |
 | `INVOKES` | Surface → File · Surface → ExternalRef | hook command, script call |
 | `PRODUCES` | File → File | artifact header, manifest, literal write path |
@@ -109,18 +110,43 @@ Written as `edges/*.yaml` with variants, routed to `gl_context_edge`.
 
 `CONTAINS`, `IMPORTS` and `DEFINES` already exist in their ontology; the first is reused as-is, `REFERENCES`'s `import-statement` variant subsumes the second for prose estates.
 
-## 6. The one genuine addition — evidence columns
+## 6. Two candidate additions, each behind a gate
 
-`evidence_class` and `detector` on every row: `OBSERVED` | `DECLARED` | `INFERRED` | `UNKNOWN`, plus the name and version of the rule that produced it.
+Everything in §3–§5 is emulation. Two things have no counterpart in the baseline, and **neither is built in phase 1.** Each is a hypothesis with a test written before it is built, so that "it seemed useful" cannot be the reason it exists.
 
-**Why add what the baseline does without.** Their inputs are parse trees — deterministic. These inputs are prose, filename conventions and heuristics, where a wrong guess is indistinguishable from a fact. Demonstrated on this project's own prototype: one detector bug produced **1,349 phantom findings out of 1,373**, every one authoritative-looking. Ninety-six percent of that report was the tool talking about itself.
+The order is deliberate: **get plain Orbit working over the estate first, then find out whether these earn a place.** An addition adopted before the base tool has been used is an addition adopted on argument.
 
-**Promotion between classes is a defect.** A confirmed declaration yields two rows, not one upgraded row.
+### Candidate A — the load ledger (`gl_context_mechanism`)
 
-Two derived constraints:
+**What it would add beyond phase 1:** `client`, `activation`, verbatim `trigger`, `scope`, `inheritance`, `lifetime`, `revocable`, and bytes attributed per entry point. Phase 1 records that a surface exists and how big it is; the ledger records *when it reaches a session, for whom, and whether it can ever stop.*
+
+**Gate — run phase 1 on the real estate first, then:** write down the three questions about loading you actually want answered. Attempt each in plain SQL over the phase-1 tables.
+
+- **Answered by phase 1 → the ledger is not built.** Filename convention plus `size_bytes` was enough.
+- **Not answerable, and the missing column is the same one each time → build it,** and build only that column.
+
+**Prior evidence, insufficient on its own:** on GitLab's repository `AGENTS.md` and `CLAUDE.md` are byte-identical at 17,294 bytes each. Phase 1 catches that with a hash. What phase 1 *cannot* say is that a Claude session pays one of them and a Codex session the other — that needs `client`. So the ledger's likeliest surviving column is `client`, and the honest first version may be one column rather than fourteen.
+
+### Candidate B — evidence columns (`evidence_class`, `detector`)
+
+**What it would add:** `OBSERVED | DECLARED | INFERRED | UNKNOWN` plus the name and version of the rule that produced each row.
+
+**Gate — after phase 1 has run on the real estate:** take a random sample of 50 findings by hand and classify each as a real estate condition or a detector artifact.
+
+- **Steady-state false-positive rate low and uniform across detectors → not built.** A single `detector` column would then be enough to trace a bad rule, and the four-way class is ceremony.
+- **Rate high, or varying sharply between detectors → built.** A finding whose reliability depends on which rule produced it must carry that rule.
+
+**Prior evidence, and its limits:** this project's own prototype produced **1,349 phantom findings out of 1,373** — 96% of a report was the tool talking about itself. That is a strong argument, but it came from *one fixed bug*. The honest question is the rate after the bug, not because of it. The sample answers that.
+
+**If either gate says no, that is a result, not a failure.** Both are recorded here so a future session can see they were considered and tested, rather than re-proposing them from scratch.
+
+### Constraints that hold in phase 1 regardless
+
+These cost nothing and are not gated:
 
 - **Constrained output vocabulary.** Tool-authored output must not contain: *broken, dangling, orphaned, obsolete, stale, dead, unused, duplicate, redundant, misplaced, wrong, should, safe to delete.* Enforced by a test over tool-authored fields only — never over paths, addresses or quotes, which carry the estate's own words.
-- **No prose columns.** No `summary`, no `purpose`. One exception: `verbatim_quote`, on DECLARED rows only, capped at 200 characters, always with a locator.
+- **No prose columns.** No `summary`, no `purpose`. The row carries a path and offsets; the caller reads the bytes.
+- **The three negative findings stay distinct** — `no-indexed-target-match`, `outside-indexed-roots`, `unresolvable-scheme` — and are never merged.
 
 ## 7. The indexer
 
@@ -158,7 +184,7 @@ Their CLI answers most of it. New commands only where there is no counterpart.
 
 The awkwardness is specific and worth stating: a tool that measures cold-start burden adds to the number it measures. The resolution is not to refuse the footprint but to **make it self-accounting** — `orbit-context setup` writes a managed section using their pattern, and `cold-start` reports that section as its own line item, by name. If the tool cannot justify its own bytes, that is a finding.
 
-## 9. Cold-start burden — the falsifier
+## 9. Cold-start burden — the falsifier *(phase 2; depends on Candidate A)*
 
 Bytes a fresh session loads, **per client, per entry point**, before it can begin one real task.
 
@@ -184,22 +210,42 @@ Against a script-built fixture estate, plus the two real repositories already us
 9. `orbit sql` joining `gl_context_surface` to `gl_file` — **already verified working**.
 10. The vocabulary lint over every command's output.
 
-## 11. Build slices
+## 11. Build phases
 
-Each sized for one session. Slice 1 is a tracer bullet: end to end, thin.
+**Phase 1 is the whole commitment.** Phases 2 and 3 are conditional on their gates in §6.
+
+### Phase 1 — plain Orbit over the estate
+
+No ledger. No evidence columns. A faithful small Orbit whose domain happens to be prose.
 
 | # | Slice | Done when |
 |---|---|---|
-| 1 | **Tracer:** walk one repo, detect instruction surfaces, write `gl_context_surface`, query via `orbit sql` | `orbit sql` returns surfaces joined to `gl_file` |
-| 2 | Ontology YAML for the context domain, in their format | Files parse against their schema; `orbit-context index` reads table shapes from them |
-| 3 | Mechanism registry → `gl_context_mechanism`; `boot` command | Ledger rows per client for a fixture estate |
-| 4 | `cold-start`, per client and entry point, with UNKNOWN lines | A number, and its itemisation, for both real repositories |
-| 5 | Clause segmentation → `gl_context_clause` with byte offsets | A rule addressable by `fqn`, bytes read from the file |
-| 6 | Pointer extraction and resolution → `gl_context_edge`, `gl_context_external_ref` | The three negative findings, distinct, with detector versions |
-| 7 | `PRODUCES` and `IDENTICAL_BYTES` | Byte-identical pairs reported with provenance-evidence count |
-| 8 | `would-load`, `repo-map` | Governance orientation inside a stated budget |
-| 9 | Fixture estate builder + vocabulary lint + acceptance scenarios | §10 passes |
-| 10 | `setup`, following their pattern, self-accounting in `cold-start` | Managed section installs, uninstalls, and reports its own bytes |
+| 1 | **Tracer.** Walk one repo, detect instruction surfaces, write `gl_context_surface`, query via `orbit sql` | `orbit sql` returns surfaces joined to `gl_file` |
+| 2 | Ontology YAML for the context domain, in their format | Files parse against their schema; the indexer reads table shapes from them |
+| 3 | Clause segmentation → `gl_context_clause` with byte offsets | A rule addressable by `fqn`, its bytes read from the file, not the graph |
+| 4 | Pointer extraction and resolution → `gl_context_edge`, `gl_context_external_ref` | The three negative findings, distinct |
+| 5 | `IDENTICAL_BYTES` and `PRODUCES` | Byte-identical pairs reported alongside how many carry provenance evidence |
+| 6 | `repo-map` for the context domain | Governance orientation inside a stated budget |
+| 7 | Fixture estate builder + vocabulary lint + acceptance scenarios | §10 passes |
+
+**Phase 1 exit:** run it over the real estate. That run is simultaneously the estate audit and the input to both gates.
+
+### Phase 2 — Candidate A, only if its gate opens
+
+| # | Slice | Done when |
+|---|---|---|
+| 8 | The narrowest column set the gate justified — likely `client` alone before anything else | The three questions from the gate are answerable |
+| 9 | `boot` and `cold-start`, per client and entry point, with UNKNOWN lines never zero | A number and its itemisation for the real estate |
+
+### Phase 3 — Candidate B, only if its gate opens
+
+| # | Slice | Done when |
+|---|---|---|
+| 10 | `evidence_class` + `detector` columns, backfilled by re-index | The hand-classified sample reproduces from the column |
+
+### Deferred past all three
+
+`would-load`, `setup` and its self-accounting, and reading unchecked-out branches via `git cat-file`. None is needed to find out whether the base tool is worth having.
 
 ## 12. Reserved for Dylan
 
