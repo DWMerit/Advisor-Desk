@@ -1,354 +1,233 @@
-# Spec 0001 (rev 2) — a diff against GitLab Orbit
+# Spec 0001 (rev 3) — Orbit Context: emulating GitLab Orbit for the HITL estate
 
-Status: draft, unimplemented
-Baseline: **GitLab Orbit**, `gitlabhq/orbit-knowledge-graph` @ `0fe19ac`, CLI `orbit 0.118.1`, installed and run.
+Status: draft, unimplemented. This document is being written, not consulted — nothing in it is settled by having been written down.
+Baseline emulated: **GitLab Orbit**, `gitlabhq/orbit-knowledge-graph` @ `0fe19ac`, CLI `orbit 0.118.1`, installed and run.
 
-## 0. What this document is
+## 1. Goal
 
-**A diff, not an independent design.**
+Run an Orbit-shaped context graph over the HITL estate, covering the half of the estate GitLab Orbit does not parse: instruction surfaces, skills, agents, hooks, and the governance pointers between them.
 
-GitLab Orbit is a working, shipped, in-use context graph for AI agents. This document does not re-derive one. It takes GitLab Orbit as the default and records only:
+**Emulate, do not reinvent.** Their architecture, their storage, their query surface, their ontology format, their command names. What changes is the *domain* — `source_code` becomes `context` — not the machinery.
 
-- what is **inherited** unchanged,
-- each **deviation**, with the reason, the reason's evidence class, what it costs if the reason is wrong, and how to revert,
-- each **addition**, with the same,
-- what is **undecided**.
+## 2. The architecture decision, settled by test
 
-Anything not named below is inherited. If a future session cannot find a deviation recorded here, the answer is *do what GitLab Orbit does.*
+Three routes were possible. A fourth was found and verified.
 
-## 1. Why this was rewritten
+Their ontology is embedded at build time (`rust-embed`). An overlay merge exists — `Ontology::load_embedded_with_overlay`, maps merge, lists append, overlay-only files are added — but it is called **only from their integration test kit**. No CLI flag or env var reaches it. So extending their ontology in the installed binary is not possible; it needs a source build.
 
-Revision 1 was an independent design that discovered GitLab Orbit afterwards and then measured GitLab against itself. That inverted the evidence. Their system is built, shipped, and running against real repositories at scale; this document is a hypothesis written in one session that has never touched the estate it is for. Those are not peers, and treating them as peers let invented choices harden into "the spec says".
+**But the local graph is a plain DuckDB file at `~/.orbit/graph.duckdb`, and nothing stops another process writing tables into it.**
 
-Under a diff, a departure is a **debt with a stated reason**, not a feature. Several of revision 1's positions do not survive that test and are demoted below.
+Verified, working, this session:
 
-## 2. Inherited from GitLab Orbit, unchanged
+```sql
+orbit sql "SELECT c.path, c.client, c.activation, c.size_bytes, f.language
+           FROM gl_context_surface c JOIN gl_file f ON f.path = c.path
+           ORDER BY c.size_bytes DESC"
+```
 
-Taken as-is. No argument required; these are their calls and they are good.
+A context domain written by a separate indexer is queried by **their** CLI and **joins to their code graph**. That is the emulation path:
 
-| Inherited | What it means here |
-|---|---|
-| **Property graph over RDF** | Typed nodes, typed directed edges, properties on both. |
-| **Ontology as one file per type** | `config/ontology/nodes/<domain>/<type>.yaml`, `config/ontology/edges/<type>.yaml`. Adding a type is adding a file. Rev 1 praised this pattern and then failed to adopt it; adopted now. |
-| **Edge `variants`** | One edge type declares many `from_node`/`to_node` pairs, each with its own description. Their `contains.yaml` carries 8 variants. This is exactly how a small edge set stays honest about what it actually connects. |
-| **`description` on every type and variant** | Machine-readable and human-readable in the same place. |
-| **Local-first, offline, no account at query time** | `orbit index .` then query. Same posture. |
-| **Read-only query surface** | Their `sql` is read-only by construction. |
-| **Purpose-built commands over raw query** | `grep`, `show`, `describe`, `repo-map`, `list` sit above `sql`. The shape is right: a few named questions, with the general query underneath. |
-| **`describe` semantics** | "Print every connection of X — callers, callees, supertypes, members, importers." This is `inbound` + `outbound` in one command, and their naming is better. **Adopted: `describe` replaces rev 1's separate `inbound`/`outbound`.** |
-| **`repo-map` as the orientation command** | A high-level, LLM-oriented map. **Adopted, name included**, replacing rev 1's invented `orient`. |
-| **MCP as a delivery surface** | They serve the graph over MCP. Same, when there is anything worth serving. |
-| **Skipped/errored file accounting** | Their `gl_file.reason` column records *why* a file was skipped (`oversize`, `timeout_parse`, `invalid_utf8`). Coverage is a first-class property of the record, not a footnote. Adopted. |
-| **Indexing emits statistics as JSON** | Counts of directories, files, definitions, relationships, skipped, errored. Adopted. |
-
-## 3. The gap that motivates a diff at all
-
-GitLab Orbit indexes **code**. It parses 20 languages — Rust, Python, Go, TypeScript, Ruby, Bash, YAML, and others — and **not Markdown**.
-
-Measured on two real repositories with the installed binary:
-
-| | GitLab's own repo (Rust) | A Markdown estate |
+| Route | Cost | Chosen |
 |---|---|---|
-| Files | 1,775 | 202 |
-| Definitions | 17,669 | **0** |
-| Edges | 57,278 | 249, all structural |
-| Index time | 15.5 s | 1.1 s |
+| Fork and build from source | Rust toolchain, upstream tracking, indexer work in Rust | No |
+| Contribute the domain upstream | Longest path, not ours to schedule | Later, maybe (§12) |
+| Parallel tool, own store | Loses their query surface, MCP, and all joins | No |
+| **Co-resident tables in their DuckDB** | **A Python indexer that writes `gl_context_*`** | **Yes** |
 
-And on their own repository, every one of the **357 edges touching a `.md` file is `CONTAINS`** — "this directory holds this file". It records that `CLAUDE.md` exists and is 17,294 bytes. It does not record that the file is an instruction surface, that it loads at repository entry, or that `AGENTS.md` beside it is byte-identical.
+Consequence: **`orbit sql` is the query engine, `orbit mcp` is the agent surface, and neither has to be built.**
 
-**That is the whole gap, and it is one addition (§5, A1), not a different system.**
+## 3. Emulated wholesale
 
-## 4. Deviations
+Adopted without argument. These are their calls.
 
-Each carries: **their choice → this choice**, the reason, the **evidence class of the reason**, the cost of the reason being wrong, and how to revert.
-
----
-
-### D1 — Domain: source code → context and governance surface
-
-**GitLab:** indexes definitions, imports and call sites across 20 languages.
-**Here:** indexes instruction surfaces, skill packages, agent definitions, hook definitions, and the pointers between Markdown and config files.
-
-**Reason:** the estate's stated problem is which rules load into a session and at what cost, which their parser set cannot see (§3).
-**Evidence class: OBSERVED.** Measured, twice, with their binary.
-**Cost if wrong:** none — it is additive. The code layer is not removed, it is delegated (§6).
-**Revert:** not applicable; without this there is no project.
-
----
-
-### D2 — Storage: persistent DuckDB → **undecided**
-
-**GitLab:** persistent DuckDB at `~/.orbit/graph.duckdb`, shared across repositories, scoped by repository and branch.
-**Rev 1:** no persistence, live derivation, cache cut on evidence.
-**Rev 2: undecided. The rev-1 position is withdrawn.**
-
-**Why withdrawn.** Rev 1 cut persistence citing 0.24 s over 190 files. That measurement does not carry: the same code took 1.6 s over 1,775 files, and a multi-repository estate is untested. Their persistence is not a design flourish — parsing 17,669 definitions is genuinely expensive and worth keeping. This document generalised one small number into a principle.
-
-**Evidence class of the reason for deviating: INFERRED, and weakly.** Not sufficient to overturn a shipped design.
-**Resolution:** measure the real estate in step 3 (§9). Live derivation is the *provisional default* only because it is the cheaper thing to try first and trivially reversible — not because it is established.
-**Note:** if persistence is adopted, the anti-staleness guarantee must come from somewhere else, and their model (index explicitly, record `commit_sha`, re-index on demand) is the thing to copy.
-
----
-
-### D3 — Node set: 6 source-code node types → 3 kinds plus roles. **Provisional.**
-
-**GitLab (`source_code` domain):** `Branch`, `Commit`, `Directory`, `File`, `Definition`, `ImportedSymbol`. Across the whole ontology, 32 node files.
-**Here:** `Scope` (repository / worktree / directory), `File`, `ExternalRef` — plus additive, evidence-bearing **roles** on a `File` (`instruction-surface`, `skill-package`, `agent-definition`, `hook-definition`, `hook-target`, `executable`, `config`, `test`, `generated-artifact`, `generator`, `decision-surface`).
-
-**Reason:** a governance file is often several things at once — a hook script is a tool *and* a hook target *and* possibly a generator. Making each a node type forces a single categorisation at index time.
-**Evidence class: INFERRED.** This is an argument from principle. It has been exercised on two repositories and did not break, which is not the same as being right.
-**Cost if wrong:** roles are unindexed labels, so role-heavy queries degrade to scans. GitLab's typed tables with per-column codecs and bloom filters exist because that mattered to them at scale.
-**Revert:** promote any role to a node type by adding one ontology file. The inherited file-per-type pattern (§2) makes this cheap **by design** — which is the main reason to adopt their pattern rather than a table in code.
-**Status: provisional until the audit.** Rev 1 stated this as settled. It is not.
-
----
-
-### D4 — Edge set: their code edges → six kinds
-
-**GitLab (code graph):** `CONTAINS`, `DEFINES`, `IMPORTS`, `CALLS`, `EXTENDS`, `ON_BRANCH`. 59 edge files across the full ontology.
-**Here:** `contains`, `references`, `loads`, `invokes`, `produces`, `identical-bytes`, each declared with **variants** in their format.
-
-Mapping, so the relationship is legible:
-
-| GitLab | Here | Note |
-|---|---|---|
-| `CONTAINS` | `contains` | Same. Inherited outright. |
-| `IMPORTS` | `references` (variant `import-statement`) | Demoted to a variant: in a Markdown estate an import is one pointer kind among many. |
-| `CALLS` | — | Not represented. Delegated (§6). |
-| `DEFINES`, `EXTENDS` | — | Sub-file structure. Delegated (§6). |
-| `ON_BRANCH` | — | See D7. |
-| — | `references` | New: Markdown links, frontmatter fields, config values, bare paths. |
-| — | `loads` | New. The point of the exercise (A1). |
-| — | `invokes` | New: hook commands, script calls. |
-| — | `produces` | New: generator → artifact. |
-| — | `identical-bytes` | New: hash equality. |
-
-**Reason:** these are the relationships that exist mechanically in a governance surface.
-**Evidence class: OBSERVED** for the existence of each (all were detected on real repositories); **INFERRED** for the claim that six is the right number.
-**Cost if wrong:** too few edge kinds means semantics hide inside `subtype` strings and become hard to query.
-**Revert:** add an edge file.
-
----
-
-### D5 — Granularity: sub-file → file-level. **Provisional.**
-
-**GitLab:** `Definition` carries `start_line`, `end_line`, `start_byte`, `end_byte`, `start_char`, `end_char`, and a virtual `content` resolved on demand.
-**Here:** file-level, with `file:line` locators on evidence records only.
-
-**Reason:** a rule inside a `CLAUDE.md` has no addressable boundary the way a function does; Markdown has no equivalent of a definition.
-**Evidence class: INFERRED.** Plausible, unproven.
-**Cost if wrong — and this may well be wrong:** the estate's real question is often *which rule*, not *which file*. A 17 KB instruction surface is not one thing; it is dozens of rules with different lifetimes. Their byte-offset model exists precisely so a caller can address a fragment without copying it, and that is the same problem.
-**Revert:** add a `Clause` node type with byte offsets into an instruction surface, following `definition.yaml` exactly.
-**Status: the most likely deviation to be reversed by the audit.**
-
----
-
-### D6 — Always-on footprint: they install one → this forbids one
-
-**GitLab:** `orbit setup <assistant>` writes a **managed section into the assistant's instruction file** (user-global by default, `--project` for the repository) and installs **nudge hooks** where the platform supports them, for Claude Code and OpenCode. It takes a one-time `.orbit-backup` before first modification, updates the section in place on re-run, and uninstalls with `--remove`. They also ship two skill packages, whose descriptions load at boot.
-**Here:** zero always-on footprint. Never in an instruction surface, never a hook, never a skill description. Invoked deliberately or not at all.
-
-**Reason:** the tool that measures cold-start burden must not be part of it, and an estate diagnosed with too many auto-loading mechanisms should not gain another.
-**Evidence class: DECLARED** — it follows from a claim about the estate, not from a measurement.
-
-**The counter-argument, stated fairly because it is strong.** GitLab made the opposite call deliberately and engineered it properly: backup before write, managed section with stable boundaries, in-place update, clean uninstall. Their reasoning is visible in the command's own help text — *"telling the assistant to prefer graph queries over grepping raw files"* — a tool nobody remembers to run is a tool that does not get used, and a graph that goes unqueried while the agent greps is worse than no graph.
-
-**Cost if wrong:** the tool is built, is correct, and nobody runs it.
-**Revert:** adopt `orbit setup`'s pattern wholesale — managed section, backup, `--remove`. It is a good design and it exists.
-**Status: a genuine open disagreement with the baseline, not a settled principle.**
-
----
-
-### D7 — Branches: `ON_BRANCH` edges and `branch` on every node → checked-out tree only
-
-**GitLab:** every code node carries `branch` and `commit_sha`; `ON_BRANCH` snapshots a node to a branch and commit; the local DB holds multiple repositories and branches side by side.
-**Here:** only the checked-out tree is read. Branches are named from the ref database; nothing is read from them.
-
-**Reason:** reading another branch requires a checkout or an object walk, with cost and side effects.
-**Evidence class: INFERRED.** Git can read another branch's blobs without checkout (`git cat-file`), so "requires a checkout" is **not true as stated** — this is a scoping choice, not a constraint. Recorded honestly.
-**Cost if wrong:** a rule, hook or skill that exists only on an unchecked-out branch is invisible. On an estate with active branches this could be a large blind spot.
-**Revert:** copy their model — carry `commit_sha` on every record and read via `git cat-file`.
-
----
-
-### D8 — Language coverage: 20 tree-sitter parsers → Markdown, JSON, TOML, YAML, shell
-
-**GitLab:** Bash, C#, C++, Elixir, Go, HCL, Java, JavaScript, Kotlin, Lua, PHP, Python, Ruby, Rust, Scala, Swift, TSX, TypeScript, YAML, Zig.
-**Here:** the file types a governance surface is written in.
-
-**Reason:** complementary coverage, not competing (§6).
-**Evidence class: OBSERVED.** Their parser list was read from `languages.rs`; the absence of Markdown was verified.
-**Cost if wrong:** none. Both can be run.
-**Revert:** n/a.
-
----
-
-### D9 — Runtime: Rust → Python 3, stdlib only
-
-**GitLab:** Rust, tree-sitter, DuckDB/ClickHouse, ~150 MB binary.
-**Here:** Python 3, standard library.
-
-**Reason:** the work is walking directories, running `git`, reading text, emitting JSON. A codebase its owner can read is a codebase its owner can trust.
-**Evidence class: INFERRED.** A preference with a rationale, not a measurement. Their choice is justified by tree-sitter and by scale; neither applies here yet.
-**Cost if wrong:** slow on a large estate. Unmeasured beyond 1,775 files / 1.6 s.
-**Revert:** cheap while the surface is small; expensive later.
-
----
-
-### D10 — Telemetry: present → absent
-
-**GitLab:** the released binary attempts telemetry to a GitLab-operated collector; `config/default.yaml` exposes `collector_url`. Observed: index runs emitted `batch send failed … snowplowprd.trx.gitlab.net` when the network blocked it.
-**Here:** no network access at all.
-
-**Reason:** a private estate.
-**Evidence class: OBSERVED** for their behaviour; **DECLARED** for the requirement.
-**Cost if wrong:** none.
-**Note:** this also bears on adopting Orbit Local itself (§6, §10).
-
----
-
-## 5. Additions
-
-Things with no counterpart in the baseline.
-
-### A1 — The load ledger
-
-The one thing GitLab Orbit does not do and this exists for.
-
-An inventory of every mechanism that can place repository-authored text into a session. One row each:
-
-`mechanism` · `client` · `source` · `activation` (`boot` | `repo-entry` | `path-scoped` | `explicit-invocation` | `event` | `agent-scoped` | `retrieval` | `runtime`) · `trigger` (quoted verbatim, with locator) · `scope` · `inheritance` · `bytes` · `est_tokens` · `lifetime` · `revocable` · `consumer_evidence`
-
-**The `client` field is not optional.** Mechanisms are client-specific: Claude Code reads `CLAUDE.md`, Codex reads `AGENTS.md`. On GitLab's own repository those two files are **byte-identical at 17,294 bytes each**, so a naive repo-entry sum of 39,975 bytes describes a client that does not exist; a real session pays ~22,700. Every figure is reported **per client and per entry point**. A cross-client total may appear only as an explicitly labelled upper bound.
-
-**The ledger is not reducible to edges.** A `loads` edge needs a file at the *from* end, and the loads that matter have none — the client loads a root instruction surface, not another file. Modelled as edges alone they vanish, and the files then report as pointerless. On a fixture that was 5 of 8 files in the bucket: the entire governance surface.
-
-**Revocability, observed:** for almost every mechanism, `revocable` is *no*. Once bytes are in a context window they stay for its life. Two consequences, reported not acted on: progressive disclosure is achievable only by **not loading**; and the only real revocation boundary is a **bounded sub-session that ends**.
-
-### A2 — Evidence classes
-
-**GitLab has none.** In their ontology a fact is a fact. Here every node, role and edge carries:
-
-`class` (OBSERVED | DECLARED | INFERRED | UNKNOWN) · `source` · `locator` · `detector` name and version
-
-- **OBSERVED** — a mechanical read that does not depend on interpretation.
-- **DECLARED** — a claim made by repository content, recorded with who said it and where.
-- **INFERRED** — an Orbit heuristic, named so it can be disagreed with specifically.
-- **UNKNOWN** — the question is known and cannot be answered mechanically. A first-class result.
-
-**Promotion between classes is a defect.** A confirmed declaration yields two records, not one upgraded record.
-
-**Why add this when the baseline does without.** Their inputs are parse trees and a database — deterministic. These inputs are prose, filename conventions and heuristics, where a wrong guess is indistinguishable from a fact. Demonstrated on this very tool: a detector bug produced **1,349 phantom findings out of 1,373**, and every one looked authoritative. Ninety-six percent of that report was the tool talking about itself.
-
-*Evidence class of this addition's reason: OBSERVED.* It is the best-supported thing in the document.
-
-### A3 — Cold-start burden
-
-`cold-start` — bytes a fresh session must load, **per client, per entry point**, before it can begin one real task. Counts OBSERVED bytes. Runtime-payload mechanisms (hooks, MCP) appear as a named **UNKNOWN line, never zero**, or the number improves by becoming less observable.
-
-Path-scoped surfaces count, keyed to entry point. Measured on GitLab's repository: entering the root costs ~22,700 bytes for one client; opening a file under `crates/indexer/` adds a further **15,133** — a 66% increase invisible in any single estate-wide figure.
-
-This is the falsifier: **count, cut, count again.** It is the only figure meant to be tracked over time and the only one whose direction has a right answer.
-
-### A4 — Constrained output vocabulary
-
-These words must not appear in tool-authored output: **broken, dangling, orphaned, obsolete, stale, dead, unused, duplicate, redundant, misplaced, wrong, should, safe to delete.** Enforced by a test over **tool-authored fields only** — never over addresses, paths, locators or quotes, which carry text the estate wrote.
-
-Three negative findings stay distinct and are never merged: `no-indexed-target-match`, `outside-indexed-roots`, `zero-recognized-inbound-pointers`. Each is a statement about the **detector set**, not about the file, and each is reported with its detector version.
-
-`zero-recognized-inbound-pointers` splits in two: *no pointers and no ledger row*, versus *no pointers but auto-loaded*. Merging them flags an estate's entire governance surface as pointerless.
-
-### A5 — No prose in the output schema
-
-The schema has **no field able to carry prose extracted from a file**, with one exception: `verbatim_quote`, permitted only on DECLARED records, capped at 200 characters, always with a locator.
-
-**This is a real divergence from the baseline.** GitLab's `File` and `Definition` both carry a virtual `content` property resolved from Gitaly at query time. That is the right call for them — resolved live, never stored, never stale. The same guarantee is available here more cheaply: hand over the path, let the caller read the file.
-
-### A6 — No durable artifacts
-
-Output goes to stdout. No report file, no generated index, no committed findings. The observation must not become another document explaining the observation.
-
-*Evidence class: DECLARED.* It follows from a claim about the estate's history, not a measurement.
-
-## 6. What is delegated rather than built
-
-**The code layer is GitLab Orbit's, off the shelf.** `orbit index .`, then `grep` / `show` / `describe` / `sql` / `repo-map` / `mcp`. Verified working: 17,669 definitions and 20,104 `CALLS` edges from 1,775 Rust files in 15.5 s, offline after install.
-
-| Question | Answered by |
+| Adopted | Detail |
 |---|---|
-| What calls this function? What breaks if I change it? | **GitLab Orbit Local** |
-| What loads into a session, from where, at what cost, on what evidence? | **This diff** |
-| Which of these governs the task? | **Neither.** Explicit activation, by a human, a workflow definition, or an event. |
+| **Persistent DuckDB** | `~/.orbit/graph.duckdb`, the same file. No live-derivation scheme, no cache of our own. Earlier revisions cut persistence on one small measurement; that is withdrawn. |
+| **`gl_` table naming and column conventions** | `id`, `traversal_path`, `project_id`, `branch`, `commit_sha`, `path`, `name`, `size_bytes`, `reason`. |
+| **`branch` + `commit_sha` on every row** | Snapshot semantics. Multiple repositories and branches coexist, scoped by `traversal_path`. |
+| **`reason` column for skipped/errored files** | Coverage is a property of the record, not a footnote. |
+| **Ontology as YAML, one file per type** | `node_type`, `domain`, `description`, `label`, `destination_table`, `default_columns`, `sort_key`, `properties`, `storage`. Written in their exact format, in a tree mirroring `config/ontology/`, so it can be overlaid or contributed upstream unchanged. |
+| **Edges declared with `variants`** | One edge type, many `from_node`/`to_node` pairs, each described. |
+| **`gl_edge` shape** | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind`, `traversal_path`. Context edges go in `gl_context_edge`, mirroring how they route code edges to `gl_code_edge`. |
+| **Sub-file granularity with byte offsets** | Their `Definition` carries `start_line`/`end_line`/`start_byte`/`end_byte`. `Clause` does the same (§4). Earlier revisions argued for file-level only; withdrawn. |
+| **Virtual `content`** | Never stored, resolved from the file at query time. Same guarantee, cheaper: the row carries the path and offsets, the caller reads the bytes. |
+| **Command shape** | `index`, `describe`, `repo-map`, `grep`, `list`, `sql`, `mcp`. Named questions above a general query. |
+| **JSON statistics from `index`** | Counts of surfaces, clauses, edges, skipped, errored. |
+| **`setup` pattern** | Managed section in the assistant's instruction file, `.orbit-backup` before first write, in-place update, clean `--remove`. See §8. |
+| **Telemetry** | **Not** adopted. The one thing dropped from their runtime behaviour. |
 
-No integration is proposed. Separate commands, separate questions, same files.
+## 4. The context domain — node types
 
-## 7. Corrections to revision 1
+New ontology files under `nodes/context/`. Their `source_code` nodes (`File`, `Directory`, `Branch`, `Commit`) are **reused, not duplicated** — the indexer joins to `gl_file` by path.
 
-Recorded so the same mistakes are not re-derived.
+### `Surface` → `gl_context_surface`
+A file that can place text into a session.
 
-1. **"GitLab Orbit does not touch the governance surface" — wrong.** It does not *index* it, but `orbit setup` **writes into instruction files and installs hooks**, and it ships skill packages whose descriptions load at boot. Revision 1's zero-footprint rule is therefore a **deviation from the baseline** (D6), not a neutral principle.
-2. **The orientation budget was invented.** Rev 1 asserted a 2,000-token budget with no basis. Their `repo-map` on a 1,775-file repository emits **12,874 bytes (~3,200 tokens)**. That is a real number from a working tool; the invented one is dropped.
-3. **Cutting persistence was overreach.** One measurement on one small repository was generalised into a principle (D2).
-4. **The ontology-as-YAML pattern was praised and then not adopted.** Fixed (§2).
-5. **`inbound` / `outbound` / `orient` were invented names** for things GitLab already names `describe` and `repo-map`. Their names are adopted.
-6. **"Reading another branch requires a checkout" is false** (D7). It is a scoping choice.
-7. **The three-node model and file-level granularity were stated as settled.** Both are provisional (D3, D5).
+`id` · `traversal_path` · `project_id` · `branch` · `commit_sha` · `path` · `surface_kind` · `client` · `activation` · `size_bytes` · `est_tokens` · `revocable` · `evidence_class` · `detector` · `reason`
+
+- `surface_kind`: `instruction-surface` | `skill-package` | `agent-definition` | `command-definition` | `hook-definition` | `mcp-config`
+- `client`: `claude` | `codex` | `cursor` | `opencode` | `any` — **not optional.** `AGENTS.md` and `CLAUDE.md` in GitLab's own repo are byte-identical at 17,294 bytes each; a client-blind sum reports 39,975 for a session that pays ~22,700.
+- `activation`: `boot` | `repo-entry` | `path-scoped` | `explicit-invocation` | `event` | `agent-scoped` | `retrieval` | `runtime`
+
+### `Clause` → `gl_context_clause`
+An addressable fragment within a surface — the governance analogue of `Definition`, and the reason granularity is sub-file.
+
+`id` · `traversal_path` · `branch` · `commit_sha` · `surface_path` · `fqn` · `heading` · `clause_type` · `start_line` · `end_line` · `start_byte` · `end_byte` · `evidence_class` · `detector`
+
+- `fqn` mirrors theirs: `CLAUDE.md#Estimating rules#M6 anchors`.
+- `clause_type`: `heading-section` | `list-rule` | `frontmatter-field` | `code-block`
+- Segmentation is by Markdown structure. A 17 KB instruction surface is dozens of rules with different lifetimes; addressing it as one file makes "which rule" unanswerable.
+
+### `Mechanism` → `gl_context_mechanism`
+The load ledger as a table. One row per way text reaches a session.
+
+`id` · `traversal_path` · `mechanism` · `client` · `source_path` · `activation` · `trigger` (verbatim, with locator) · `scope` · `inheritance` · `bytes` · `est_tokens` · `lifetime` · `revocable` · `consumer_evidence` · `evidence_class` · `detector`
+
+**Not reducible to edges.** A `LOADS` edge needs a file at the *from* end, and the loads that matter have none — the client loads a root instruction surface, not another file. Modelled as edges alone they vanish and their targets report as pointerless.
+
+`bytes` is `NULL`, never `0`, where the payload is produced at runtime.
+
+### `ExternalRef` → `gl_context_external_ref`
+A pointer target not resolvable inside the indexed roots.
+
+`id` · `address` · `sub_kind` · `evidence_class` · `detector`
+
+`sub_kind`: `no-indexed-target-match` | `outside-indexed-roots` | `unresolvable-scheme`. **Never merged**, and each is a statement about the detector set, not the file.
+
+## 5. The context domain — edge types
+
+Written as `edges/*.yaml` with variants, routed to `gl_context_edge`.
+
+| Edge | Variants | Evidence |
+|---|---|---|
+| `LOADS` | Mechanism → Surface; Surface → Clause | mechanism registry + config |
+| `REFERENCES` | Surface → File · Surface → Surface · Clause → Surface · Surface → ExternalRef | markdown-link, frontmatter-field, config-value, bare-path, import-statement, supersedes-claim |
+| `INVOKES` | Surface → File · Surface → ExternalRef | hook command, script call |
+| `PRODUCES` | File → File | artifact header, manifest, literal write path |
+| `IDENTICAL_BYTES` | File ↔ File | sha256 equality |
+| `CONTAINS` | Surface → Clause · Clause → Clause | inherited semantics, nested headings |
+
+`CONTAINS`, `IMPORTS` and `DEFINES` already exist in their ontology; the first is reused as-is, `REFERENCES`'s `import-statement` variant subsumes the second for prose estates.
+
+## 6. The one genuine addition — evidence columns
+
+`evidence_class` and `detector` on every row: `OBSERVED` | `DECLARED` | `INFERRED` | `UNKNOWN`, plus the name and version of the rule that produced it.
+
+**Why add what the baseline does without.** Their inputs are parse trees — deterministic. These inputs are prose, filename conventions and heuristics, where a wrong guess is indistinguishable from a fact. Demonstrated on this project's own prototype: one detector bug produced **1,349 phantom findings out of 1,373**, every one authoritative-looking. Ninety-six percent of that report was the tool talking about itself.
+
+**Promotion between classes is a defect.** A confirmed declaration yields two rows, not one upgraded row.
+
+Two derived constraints:
+
+- **Constrained output vocabulary.** Tool-authored output must not contain: *broken, dangling, orphaned, obsolete, stale, dead, unused, duplicate, redundant, misplaced, wrong, should, safe to delete.* Enforced by a test over tool-authored fields only — never over paths, addresses or quotes, which carry the estate's own words.
+- **No prose columns.** No `summary`, no `purpose`. One exception: `verbatim_quote`, on DECLARED rows only, capped at 200 characters, always with a locator.
+
+## 7. The indexer
+
+`orbit-context index <path>` — Python 3, stdlib plus `duckdb`.
+
+1. Walk indexed roots; find git repositories; read git state per repository.
+2. Join to `gl_file` where present; index independently where not.
+3. Detect surfaces by filename and frontmatter convention → `gl_context_surface`.
+4. Segment surfaces into clauses by Markdown structure → `gl_context_clause`.
+5. Build the mechanism registry from settings files, skill and agent directories, and known client conventions → `gl_context_mechanism`.
+6. Extract and resolve pointers → `gl_context_edge`, `gl_context_external_ref`.
+7. Hash every file; emit `IDENTICAL_BYTES`.
+8. Emit JSON statistics, including skipped and errored counts with reasons.
+
+Writes only `gl_context_*` tables. **Never writes to their tables.** Re-index replaces rows for the indexed `(traversal_path, branch, commit_sha)`.
+
+Reads the checked-out tree. Other branches are reachable via `git cat-file` without checkout — deferred to a later slice, and recorded as a coverage gap until then, not as absence.
 
 ## 8. Query surface
 
-Inherited names first; new commands only where there is no counterpart.
+Their CLI answers most of it. New commands only where there is no counterpart.
 
 | Command | Origin |
 |---|---|
-| `index` | Inherited |
-| `describe <path>` | Inherited name and semantics — every connection of a thing |
-| `repo-map` | Inherited — orientation |
-| `list` | Inherited — indexed repositories |
-| `sql` / general query | Inherited — read-only |
-| `mcp` | Inherited |
-| `estate` | New — repositories, worktrees, git state |
-| `boot [--client C] [--from PATH]` | New — the ledger (A1) |
-| `cold-start [--client C] [--from PATH]` | New — the falsifier (A3) |
-| `would-load <selector>` | New — describes; never loads, never runs a hook. Reports the count of boot/repo-entry mechanisms it excluded, and points at `boot` for them. |
-| `trace <path>` | New — producers, consumers, tests |
-| `unmatched` / `outside` / `unpointed` / `dupes` | New — the negative findings (A4) |
-| `blindspots` | New — what cannot be known mechanically |
+| `orbit sql` | **Theirs.** The general query surface, across both domains. |
+| `orbit describe` | **Theirs.** Extended by the context edges, since they land in a table it already reads. |
+| `orbit mcp` | **Theirs.** The agent surface. |
+| `orbit-context index` | New |
+| `orbit-context boot --client C [--from PATH]` | New — the ledger for a cold session |
+| `orbit-context cold-start --client C [--from PATH]` | New — the falsifier (§9) |
+| `orbit-context would-load <selector>` | New — describes; never loads, never runs a hook. States the count of boot/repo-entry mechanisms it excluded. |
+| `orbit-context repo-map` | New — governance orientation, budgeted against their measured 12,874 bytes for a 1,775-file repo |
 
-## 9. How this gets tested
+**Footprint.** GitLab's `orbit setup` deliberately writes a managed section into instruction files and installs nudge hooks, because a tool nobody remembers to run does not get used. Their engineering is sound — backup, in-place update, clean uninstall — and their argument is correct.
 
-1. Rev 2 (this document).
-2. **Prototype** — throwaway, on `prototype/orbit-observer`, already run: all seven acceptance scenarios on a synthetic estate, plus two real repositories.
-3. **Audit** — run over the real estate. Settles D2 (persistence), D3 (node set), D5 (granularity), D7 (branches), and whether the cold-start metric holds.
-4. **Build** — corrected diff, fixtures harvested from step 3, one seam: a script-built fixture estate to JSON, plus the vocabulary lint.
+The awkwardness is specific and worth stating: a tool that measures cold-start burden adds to the number it measures. The resolution is not to refuse the footprint but to **make it self-accounting** — `orbit-context setup` writes a managed section using their pattern, and `cold-start` reports that section as its own line item, by name. If the tool cannot justify its own bytes, that is a finding.
 
-## 10. Reserved for Dylan
+## 9. Cold-start burden — the falsifier
 
-1. **The indexed roots.** The boundary is a decision, not an observation.
-2. **Whether user-global surfaces (`~/.claude/`) are inside it.** They load automatically and sit outside every repository.
-3. **D6 — always-on footprint.** GitLab installs one deliberately and engineered it well. A tool nobody runs is worth nothing. This is the sharpest open disagreement with the baseline.
-4. **D2 — persistence**, once the audit gives a real number.
-5. **D5 — granularity.** If the real question is *which rule* rather than *which file*, their byte-offset model is the answer and this deviation reverses.
-6. **Whether to adopt Orbit Local**, given its persistent index and its telemetry.
-7. **Which clients count** for cold-start. The set changes every number.
-8. **Whether this should be built at all.** §11 stands.
-9. **What "one real estimating task" means** for the cold-start count.
-10. **Whether a rule removed to lower that number was doing work.** Measurable: no.
+Bytes a fresh session loads, **per client, per entry point**, before it can begin one real task.
 
-## 11. Kill conditions
+- Counts OBSERVED bytes only.
+- Runtime payloads (hooks, MCP servers) appear as a named UNKNOWN line, **never zero** — otherwise the number improves by becoming less observable.
+- Path-scoped surfaces count, keyed to entry point. Measured on GitLab's own repository: root entry ≈ 22,700 bytes for one client; opening a file under `crates/indexer/` adds **15,133** more, a 66% jump invisible in any single estate-wide figure.
+- The tool's own managed section is a line item.
 
-Stated in advance, so stopping is a planned outcome.
+**Count, cut, count again.** The only figure meant to be tracked over time, and the only one whose direction has a right answer.
+
+## 10. Verification
+
+Against a script-built fixture estate, plus the two real repositories already used.
+
+1. Boot path from repository entry, per client, with the hook payload reported UNKNOWN.
+2. An explicitly invoked skill: body separated from its always-on description.
+3. A hook definition resolved to its target script.
+4. A generated artifact traced to producer (DECLARED) and consumer (OBSERVED).
+5. A cross-repository reference.
+6. A pointer with no indexed match.
+7. A file with zero recognized inbound pointers, split into *no ledger row* versus *auto-loaded*.
+8. A clause addressed by `fqn`, its bytes read from the file, not from the graph.
+9. `orbit sql` joining `gl_context_surface` to `gl_file` — **already verified working**.
+10. The vocabulary lint over every command's output.
+
+## 11. Build slices
+
+Each sized for one session. Slice 1 is a tracer bullet: end to end, thin.
+
+| # | Slice | Done when |
+|---|---|---|
+| 1 | **Tracer:** walk one repo, detect instruction surfaces, write `gl_context_surface`, query via `orbit sql` | `orbit sql` returns surfaces joined to `gl_file` |
+| 2 | Ontology YAML for the context domain, in their format | Files parse against their schema; `orbit-context index` reads table shapes from them |
+| 3 | Mechanism registry → `gl_context_mechanism`; `boot` command | Ledger rows per client for a fixture estate |
+| 4 | `cold-start`, per client and entry point, with UNKNOWN lines | A number, and its itemisation, for both real repositories |
+| 5 | Clause segmentation → `gl_context_clause` with byte offsets | A rule addressable by `fqn`, bytes read from the file |
+| 6 | Pointer extraction and resolution → `gl_context_edge`, `gl_context_external_ref` | The three negative findings, distinct, with detector versions |
+| 7 | `PRODUCES` and `IDENTICAL_BYTES` | Byte-identical pairs reported with provenance-evidence count |
+| 8 | `would-load`, `repo-map` | Governance orientation inside a stated budget |
+| 9 | Fixture estate builder + vocabulary lint + acceptance scenarios | §10 passes |
+| 10 | `setup`, following their pattern, self-accounting in `cold-start` | Managed section installs, uninstalls, and reports its own bytes |
+
+## 12. Reserved for Dylan
+
+1. **The indexed roots.** The estate boundary is a decision, not an observation.
+2. **Whether `~/.claude/` and other user-global surfaces are inside it.** They load automatically and sit outside every repository.
+3. **Which clients count.** The set changes every number in §9.
+4. **Whether to adopt Orbit Local for the code half**, given its persistent index and its telemetry to a GitLab-operated collector.
+5. **§8 footprint.** The self-accounting resolution is proposed, not settled.
+6. **Whether the context domain is eventually contributed upstream** as a GitLab ontology domain rather than maintained co-resident. Their README explicitly invites ontology contributions.
+7. **What "one real estimating task" means** for the cold-start count.
+8. **Whether a rule removed to lower that number was doing work.** The tool measures the number; it cannot measure the loss.
+9. **Whether this is built at all.** §13 stands.
+
+## 13. Kill conditions
+
+Stated in advance, so stopping is a planned outcome rather than a failure.
 
 - It agrees with the hand-built indexes and surfaces nothing they did not already show.
 - Its output starts being pasted into documents, or anyone asks it to write one.
 - The cold-start number rises during its existence.
-- It needs a persistent graph **and** a query DSL **and** a second implementation to stay accurate — at which point the honest move is to file the governance ontology upstream with GitLab rather than maintain a parallel system.
+- It needs its own store, its own query language, or a second implementation — at which point the honest move is to contribute the ontology upstream instead of maintaining a parallel system.
 - Someone reaches for it to decide something rather than to check something.
 
-## 12. Permanent UNKNOWNs
+## 14. Permanent UNKNOWNs
 
 - What any hook emits, without running it.
 - What an MCP server injects at boot.
-- Content on any branch not checked out (until D7 reverses).
+- Content on branches not checked out, until §7's `git cat-file` slice lands.
 - Whether a loaded instruction influenced any output.
 - Whether a path-shaped string in prose was a pointer or an example.
 - Whether two identical files are intentionally identical.
