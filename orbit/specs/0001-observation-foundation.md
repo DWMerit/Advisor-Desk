@@ -186,6 +186,13 @@ Notes that matter:
 - `generated-artifact` is DECLARED because the file is asserting something about itself. A file with no marker is not thereby hand-written — it is unmarked.
 - Absence of every role is not a finding. Most files have no role. That is normal.
 
+**Measured after the prototype (§17).** Over one real repository of 190 files, the registry above matched **three role types** — `decision-surface`, `executable`, `generated-artifact` — and nothing else. That is not a gap in the repository; it is the registry being tuned for agent-tooling estates and the repository being a content estate.
+
+Two rules follow:
+
+- **Role coverage is itself a reportable fact.** Every report states how many files carried no role, so a sparse result reads as *"these detectors found little here"* rather than as a description of the estate.
+- **The registry is estate-specific and expected to be extended.** A role is a detector someone wrote, not a category the world has. Adding one must never require touching the node model, the edge model, or the CLI.
+
 ---
 
 ## 7. Relationship model
@@ -254,6 +261,10 @@ Evidence ladder, and the class follows the rung:
 File ↔ File, hash equality. Pure observation, zero interpretation. Class: OBSERVED.
 
 **Cannot conclude:** duplication in the sense that matters. Two identical files may be a deliberate vendored copy, a build output, or an accident. Orbit reports the hash match and the two paths. The word "duplicate" does not appear in output.
+
+**A blind spot the prototype exposed.** The real repository returned **28 identical-byte pairs**, every one of them a workbench file matching a published file — almost certainly one pipeline, run once per pair. Orbit saw all 28 matches and **zero** `produces` edges, because the published files carry no generation header and no manifest declares the pipeline. So the strongest available signal about that estate was visible only in its weakest form: a hash coincidence, 28 times, with the provenance that explains it entirely invisible.
+
+This is the general case, and it is worth stating plainly: **byte-identity and provenance are frequently the same phenomenon, and Orbit can usually see only the first.** Where the two disagree, the `produces` edge is the one to trust and the hash match is the one that is easy to over-read. A count of identical-byte pairs is therefore never reported as a headline on its own — it is reported alongside how many of those pairs have any provenance evidence at all. Here: 0 of 28.
 
 ### 7.7 Relationships deliberately not modelled as edges
 
@@ -392,6 +403,8 @@ Twelve commands. Each answers one of the questions the estate must be able to as
 
 Cross-cutting flags: `--json` (default for machine use), `--class OBSERVED|DECLARED|INFERRED|UNKNOWN` (filter, never collapse), `--budget N`, `--no-cache`, `--roots PATH...`.
 
+`orbit would-load` reports only what is *not* already automatic, so a boot-activated mechanism never appears in it — in the prototype, asking `would-load hook` returned the `PreToolUse` hook and silently omitted the `SessionStart` one, which is boot. Correct, and a trap. Every `would-load` result therefore states the count of boot and repo-entry mechanisms it excluded, and points at `orbit boot` for them.
+
 `orbit would-load` is deliberately named for what it does. It never checks out, never runs a hook, never reads a skill body it is only measuring. Naming it `activate` would have been an invitation to violate I6.
 
 ---
@@ -431,8 +444,10 @@ No summary field. No description field. No "purpose" field. If a consumer wants 
 ## 13. State, configuration, caching
 
 - **No persistent graph.** Every command derives from live filesystem and git state.
-- **Cache** is optional, content-addressed by file hash, stored under a single disposable directory, invalidated by hash mismatch, and bypassable with `--no-cache`. Deleting it must never change an answer, only the time to get it. If it ever does, that is a defect.
-- **Configuration is one file**, `orbit.toml`, and it may contain only: indexed roots, excluded globs, detector toggles, and paths declared as project/job evidence. Anything else must be justified by evidence that live derivation cannot supply it.
+- **No cache. Cut after the prototype (§17).** The draft of this spec provided for an optional content-addressed cache. The prototype measured a full observation of 190 files and 1,800 references at **0.24 s**, cold, in Python, with no cache at all. At estate scale the cache was solving a problem that does not exist, while adding an invalidation rule, a `--no-cache` flag, a disposable directory, and a second place an answer could come from. All of that is now removed.
+
+  A cache may be reintroduced only against a **measured** wall-clock number on the real estate that a person finds unacceptable — not a predicted one. Until then, every command derives live, and there is exactly one place any answer comes from. This is the first thing this spec has been able to delete on evidence rather than argument, which is the direction the whole document is supposed to move.
+- **Configuration is one file**, `orbit.toml`, and it may contain only: indexed roots, excluded globs, detector toggles, and paths declared as project/job evidence. The prototype ran with **no config at all** — roots on the command line, everything else derived — so even this file is a widening, not a requirement. Anything else must be justified by evidence that live derivation cannot supply it.
 - **Zero-config default:** given a starting path, index every git repository at or beneath it. Config exists to widen or narrow that, not to describe the estate.
 
 Every added config key is a place the map can drift from the territory. The bar for adding one is high and stated here so a future session has to argue past it.
@@ -468,7 +483,9 @@ An LLM-based relevance authority. Selection is explicit — a human, a workflow 
 
 ### One seam: fixture estate → JSON
 
-A small synthetic estate is checked into the repository under `orbit/fixtures/`. It contains **real** git repositories (created by a setup script, committed as a tarball or built on demand), real settings files with real hooks, a real skill package, a real generated artifact with a real header, a real pointer that resolves nowhere, and a real file nobody points at.
+The fixture estate is **built by a script at test time, not committed as a tree**. Amended after the prototype: committing real git repositories inside this repository means nested `.git` directories, which git will not track normally and which every clone and every tool then has to special-case. A ~90-line builder that writes the files, runs `git init`, commits, and adds a second branch produced a complete two-repo estate that exercised all seven scenarios, and it is readable in one screen — which a committed tarball is not.
+
+The built estate contains **real** git repositories, real settings files with real hooks, a real skill package, a real agent definition, a real generated artifact with a real header, a real cross-repository link, a real pointer that resolves nowhere, a real file nobody points at, and a real byte-identical pair.
 
 Tests run the whole observer over a fixture and compare emitted JSON against a committed expectation. No mocks. No internal test doubles. Collectors, git reads, loader tracing and evidence tagging are all exercised through this one boundary, which leaves internals free to be restructured without rewriting tests.
 
