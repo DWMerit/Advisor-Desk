@@ -208,6 +208,13 @@ Class: OBSERVED that *the token exists at file:line*. The **resolution** is OBSE
 
 **False-positive risks, which the report must state:** a path-shaped string inside a code sample, a fenced block, a commented-out line, or a string that coincidentally looks like a path. Orbit records whether the token was inside a fenced code block, and never removes such matches — it labels them.
 
+**Measured after the prototype (§17), and the single largest risk in the whole model.** Token-boundary handling in the bare-path detector dominated the finding count. A backtick placed in a negative lookbehind did not skip inline code — it shifted the match *start* into the middle of the token, so `` `patterns-of-enterprise-application-architecture/…mini.md` `` matched as `of-enterprise-application-architecture`, a target that cannot exist. Over one real repository that produced **1,349 phantom `no-indexed-target-match` findings out of 1,373**. Correct boundary handling: **59**.
+
+Two rules follow, and they are not optional:
+
+- A reference detector must match from a real token boundary (line start, whitespace, or one of `` ` `` `'` `"` `(` `<` `[`), never from a negative lookbehind that can slide the start.
+- Every negative finding is reported **with its detector version**, because a detector bug is indistinguishable from an estate condition when you are only shown the count. Ninety-six percent of that first count was Orbit talking about itself.
+
 **Cannot conclude:** that the reference is used, current, intended, or authoritative. A reference is a string, not a dependency.
 
 ### 7.3 `loads`
@@ -219,6 +226,8 @@ Source: the mechanism registry (§10) plus the config that activates it. Class: 
 This edge is the reason Orbit exists. It is the only mechanical way to see the governance surface.
 
 **Cannot conclude:** that what loads *should* load, that it was consumed, or that it influenced anything.
+
+**Amended after the prototype (§17).** The load ledger is **not reducible to edges.** A `loads` edge requires an in-repo file at the *from* end, and the most important loads have none: a root instruction surface, a skill description and an agent description are loaded by the client, not by anything in the repository. Modelled as edges alone they vanish. So the ledger (§10) is a first-class output, not a rendering of the graph, and §9's `zero-recognized-inbound-pointers` must be read against it — see the two buckets below.
 
 ### 7.4 `invokes`
 
@@ -291,11 +300,16 @@ These three must never be collapsed. Each is a statement about **Orbit's detecto
 | `outside-indexed-roots` | The pointer resolves to a real path Orbit was not asked to index. | Anything is wrong. This is usually correct and expected. |
 | `zero-recognized-inbound-pointers` | No edge produced by Orbit's current detector set points at this file. | The file is unused, orphaned, or valueless. Orbit's detectors are incomplete by construction. |
 
+`zero-recognized-inbound-pointers` splits into **two buckets**, and reporting them as one is a defect:
+
+- **zero pointers, and no ledger row** — nothing Orbit recognises points at it *and* no mechanism loads it.
+- **zero pointers, but auto-loaded** — nothing points at it because nothing needs to: the client loads it. In the prototype run this was every `CLAUDE.md`, every `SKILL.md`, every agent definition and `settings.json` — 5 of the 8 files in the single bucket. Merging them would have flagged the estate's entire governance surface as pointerless.
+
 ### Output vocabulary is constrained, and the constraint is tested
 
 The following words must not appear in Orbit's generated output: **broken, dangling, orphaned, obsolete, stale, dead, unused, duplicate, redundant, misplaced, wrong, should, safe to delete.**
 
-This is enforced by a test over Orbit's own output (§15). It is a cheap, mechanical guarantee against the exact failure the whole design is built to avoid: the map quietly becoming a judge. Words a user types are their own business; words Orbit emits are the spec's business.
+This is enforced by a test over Orbit's own output (§15), and the test runs over **Orbit-authored fields only** — never over node addresses, file paths, locators or `verbatim_quote`. Those carry text the estate wrote. The prototype's lint fired on the node address `ext:no-indexed-target-match:repo-one/orphan-note.md`: a forbidden word, echoed from a filename, in a data field. Linting echoed data would force Orbit to launder the estate's own vocabulary, which is the opposite of the rule's purpose. It is a cheap, mechanical guarantee against the exact failure the whole design is built to avoid: the map quietly becoming a judge. Words a user types are their own business; words Orbit emits are the spec's business.
 
 ---
 
@@ -524,6 +538,16 @@ A skill file nothing links to.
 4. **Build** — corrected spec, fixtures harvested from step 3, one seam.
 
 If the prototype cannot describe the real estate using only §5–§10, this spec is wrong and gets amended before anything is built properly.
+
+### Prototype result (step 2 complete)
+
+Branch `prototype/orbit-observer`, not for merge. Driven over a synthetic two-repo estate covering all seven §16 scenarios, and over one real repository (190 files, 1,800 references, 0.24 s, Python 3 stdlib only, ~560 lines).
+
+**Answer to the question: yes.** Three node kinds, six edge kinds and four certainty classes were sufficient to describe both estates, and no case appeared that required a new node kind, a new edge kind, or a semantic judgement. Roles-on-files absorbed every object the brief listed without a categorisation decision at index time.
+
+Three corrections were required and are folded in above: the ledger is not reducible to edges (§7.3, §9); the vocabulary lint must be scoped to Orbit-authored fields (§9); reference-detector boundary handling is the dominant false-positive source and must carry its detector version (§7.2).
+
+Two things the prototype did **not** settle, and step 3 must: whether the ~59 remaining negative findings are estate conditions or further detector gaps, and whether the cold-start number is meaningful on an estate that actually has one — the repository used carries no instruction surface, no skills and no hooks, so its cold-start burden measured **0 bytes with 0 unmeasurable mechanisms**. That is a true reading of an unusual repository, not a validation of the metric.
 
 ---
 
