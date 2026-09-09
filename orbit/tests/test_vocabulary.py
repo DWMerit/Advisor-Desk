@@ -15,7 +15,7 @@ from pathlib import Path
 from . import support  # noqa: F401
 
 from build_estate import build
-from orbit_context import clauses, settings, surfaces
+from orbit_context import clauses, pointers, settings, surfaces
 from orbit_context.indexer import index
 from orbit_context.ontology import load
 
@@ -69,6 +69,16 @@ class TestVocabulary(unittest.TestCase):
     def test_clause_types(self):
         for clause_type in clauses.CLAUSE_TYPES:
             self.assertEqual(offending_words(clause_type), [], clause_type)
+
+    def test_pointer_detector_names(self):
+        for subtype in pointers.SUBTYPES:
+            self.assertEqual(offending_words(subtype), [], subtype)
+
+    def test_external_ref_sub_kinds(self):
+        # The three negative findings. Each names what the detector set could
+        # see, and none of them names a defect.
+        for sub_kind in pointers.SUB_KINDS:
+            self.assertEqual(offending_words(sub_kind), [], sub_kind)
 
     def test_column_names(self):
         # Nodes and edges alike: every column name is the tool's own word.

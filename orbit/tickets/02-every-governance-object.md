@@ -19,11 +19,13 @@ For hook definitions, resolve the command to a file where it resolves, and mark 
 
 ## Acceptance
 
-- [ ] All six `surface_kind` values appear from a fixture containing one of each
-- [ ] Frontmatter bytes and body bytes are separately queryable for a skill
-- [ ] A hook definition row carries its matcher **quoted verbatim** with a `file:line` locator
-- [ ] A hook whose command resolves to a script in the tree is linked to that file
-- [ ] A hook whose command is a PATH lookup is recorded as unresolvable, not as missing
+- [x] All six `surface_kind` values appear from a fixture containing one of each
+- [x] Frontmatter bytes and body bytes are separately queryable for a skill
+- [x] A hook definition row carries its matcher **quoted verbatim** with a `file:line` locator
+- [x] A hook whose command resolves to a script in the tree is linked to that file
+- [x] A hook whose command is a PATH lookup is recorded as unresolvable, not as missing
+
+All five are pinned by test in `orbit/tests/test_governance.py`.
 
 ## Watch for
 

@@ -100,7 +100,13 @@ def server_entries(document: Document) -> list[ServerEntry]:
     return entries
 
 
-def _expand(token: str, repo_root: Path) -> str:
+def expand_variables(token: str, repo_root: Path) -> str:
+    """Expand the variables a client documents; leave every other one alone.
+
+    Also used by the pointer detectors, so a command written through
+    ``$CLAUDE_PROJECT_DIR`` in a settings file is judged on where it points
+    rather than on the literal text.
+    """
     for variable in PROJECT_DIR_VARIABLES:
         token = token.replace(variable, str(repo_root))
     return token
@@ -137,7 +143,7 @@ def resolve_command(command: str, repo_root: Path) -> tuple[str | None, str]:
     if not tokens:
         return None, RESOLUTION_UNPARSABLE_COMMAND
 
-    expanded = [_expand(token, repo_root) for token in tokens]
+    expanded = [expand_variables(token, repo_root) for token in tokens]
     for token in expanded:
         relative = _inside_tree(token, repo_root)
         if relative is not None:

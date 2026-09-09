@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import clauses as clause_module
 from . import ontology as ontology_module
+from . import pointers as pointer_module
 from . import store, surfaces
 from .ontology import EdgeType, NodeType, OntologyError
 from .workspace import (
@@ -24,7 +25,14 @@ from .workspace import (
 
 SURFACE_NODE = "Surface"
 CLAUSE_NODE = "Clause"
+EXTERNAL_REF_NODE = "ExternalRef"
 CONTAINS_EDGE = "CONTAINS"
+REFERENCES_EDGE = "REFERENCES"
+
+# Orbit's own node type. A pointer landing on a file that is not a governance
+# surface points at a row in their `gl_file`, in their database -- so the edge
+# carries the path, and the join that crosses graphs goes by path.
+FILE_NODE = "File"
 
 
 @dataclass
@@ -37,6 +45,11 @@ class RepoResult:
     surfaces: int = 0
     clauses: int = 0
     edges: int = 0
+    pointers: int = 0
+    # Counted per sub_kind, never summed into one number: the three are
+    # different statements about the detector set, and one total says none of
+    # them.
+    external_refs: dict = field(default_factory=dict)
     skipped: list[dict] = field(default_factory=list)
     errored: list[dict] = field(default_factory=list)
 
@@ -129,13 +142,20 @@ def _clause_row(node: NodeType, repo: Repository, surface_path: str,
 
 
 def _edge_row(edge: EdgeType, repo: Repository, source_id: int, source_kind: str,
-              target_id: int, target_kind: str) -> dict:
+              target_id: int, target_kind: str, **extra) -> dict:
+    """One edge row's values, checked against the variants the type declares.
+
+    ``extra`` carries what one edge type holds and another does not -- a
+    detector, a locator, an address. Values are returned unfiltered; a shared
+    table's column set is applied once, at write time, so a column belonging to
+    a sibling edge type lands as NULL rather than going missing.
+    """
     if not edge.allows(source_kind, target_kind):
         raise OntologyError(
             f"{edge.source_file}: {edge.edge_type} declares no variant "
             f"{source_kind} -> {target_kind}"
         )
-    values = {
+    return {
         "source_id": source_id,
         "source_kind": source_kind,
         "relationship_kind": edge.edge_type,
@@ -145,26 +165,32 @@ def _edge_row(edge: EdgeType, repo: Repository, source_id: int, source_kind: str
         "project_id": repo.project_id,
         "branch": repo.branch,
         "commit_sha": repo.commit_sha,
+        **extra,
     }
-    return {name: values.get(name) for name in edge.column_names}
 
 
 def _segment(clause_node: NodeType, edge: EdgeType, repo: Repository,
              surface_id: int, surface_path: str,
-             text: str) -> tuple[list[dict], list[dict]]:
-    """Cut one surface into clause rows, and the CONTAINS edges holding them.
+             text: str) -> tuple[list[dict], list[dict], list[tuple[int, int, int]]]:
+    """Cut one surface into clause rows, the CONTAINS edges, and the spans.
 
     Depth is not a column. A clause nested inside another is an edge between
     them, so "how deep does this nest" is a walk of the graph at query time
     rather than a number frozen at index time.
+
+    The spans -- ``(start_byte, end_byte, id)`` per clause -- are what lets a
+    pointer be attributed to the rule it was written in rather than to the whole
+    file.
     """
     clause_rows: list[dict] = []
     edge_rows: list[dict] = []
+    spans: list[tuple[int, int, int]] = []
     ids: list[int] = []
     for clause in clause_module.segment(text, surface_path):
         clause_id, row = _clause_row(clause_node, repo, surface_path, clause)
         ids.append(clause_id)
         clause_rows.append(row)
+        spans.append((clause.start_byte, clause.end_byte, clause_id))
         if clause.parent is None:
             source_id, source_kind = surface_id, SURFACE_NODE
         else:
@@ -172,7 +198,114 @@ def _segment(clause_node: NodeType, edge: EdgeType, repo: Repository,
         edge_rows.append(
             _edge_row(edge, repo, source_id, source_kind, clause_id, CLAUSE_NODE)
         )
-    return clause_rows, edge_rows
+    return clause_rows, edge_rows, spans
+
+
+def _external_row(node: NodeType, repo: Repository, address: str,
+                  sub_kind: str) -> tuple[int, dict]:
+    """One ExternalRef row, and the id it is addressed by.
+
+    Deduplicated on the address and the non-resolution it met, so a path named
+    forty times in one repository is one row with forty edges into it rather
+    than forty rows.
+    """
+    identity = (repo.project_id, repo.branch, repo.commit_sha, address, sub_kind)
+    values = {
+        "id": stable_id(*identity),
+        "traversal_path": LOCAL_TRAVERSAL_PATH,
+        "project_id": repo.project_id,
+        "branch": repo.branch,
+        "commit_sha": repo.commit_sha,
+        "address": address,
+        "sub_kind": sub_kind,
+    }
+    return values["id"], {name: values.get(name) for name in node.column_names}
+
+
+def _innermost(spans: list[tuple[int, int, int]], offset: int) -> int | None:
+    """The id of the smallest clause span holding ``offset``, or None.
+
+    A parent's span includes its descendants, so the smallest containing span is
+    the clause the pointer was actually written in. Text above the first heading
+    sits in no clause at all, and that is what None means.
+    """
+    holding = [span for span in spans if span[0] <= offset < span[1]]
+    if not holding:
+        return None
+    return min(holding, key=lambda span: span[1] - span[0])[2]
+
+
+def _pointer_edges(edge: EdgeType, external_node: NodeType, repo: Repository,
+                   surface_row: dict, surface_path: str,
+                   found: tuple, spans: list[tuple[int, int, int]],
+                   whole_file_surfaces: dict[str, int],
+                   external_rows: dict[int, dict],
+                   counts: dict[str, int]) -> list[dict]:
+    """Resolve one surface's pointers into edges, and the ExternalRefs they need."""
+    rows: list[dict] = []
+    for pointer in found:
+        resolution = pointer_module.resolve(
+            pointer_module.expanded(pointer.address, repo.root),
+            repo.root,
+            surface_path,
+        )
+        if resolution is None:
+            continue
+
+        if resolution.resolved:
+            target_path = resolution.target_path
+            target_id = whole_file_surfaces.get(target_path)
+            if target_id is not None:
+                target_kind = SURFACE_NODE
+            else:
+                # Orbit's row, in Orbit's database. The id is a deterministic
+                # handle so the edge has a stable identity; the join that
+                # crosses graphs goes by target_path.
+                target_kind = FILE_NODE
+                target_id = stable_id(
+                    repo.project_id, repo.branch, repo.commit_sha, FILE_NODE, target_path
+                )
+        else:
+            target_path = ""
+            target_kind = EXTERNAL_REF_NODE
+            target_id, row = _external_row(
+                external_node, repo, pointer.address, resolution.sub_kind
+            )
+            if target_id not in external_rows:
+                external_rows[target_id] = row
+                counts[resolution.sub_kind] = counts.get(resolution.sub_kind, 0) + 1
+
+        clause_id = _innermost(spans, pointer.start_byte)
+        source_id = clause_id if clause_id is not None else surface_row["id"]
+        source_kind = CLAUSE_NODE if clause_id is not None else SURFACE_NODE
+        rows.append(
+            _edge_row(
+                edge, repo, source_id, source_kind, target_id, target_kind,
+                subtype=pointer.subtype,
+                source_path=surface_path,
+                source_line=pointer.line,
+                target_address=pointer.address,
+                target_path=target_path,
+                in_code_fence=pointer.in_code_fence,
+            )
+        )
+    return rows
+
+
+def _whole_file_surfaces(rows: dict[int, dict]) -> dict[str, int]:
+    """Path to surface id, for the surfaces that are a whole file.
+
+    A hook definition and an MCP server are entries *inside* a settings file, so
+    a pointer at that path names the file rather than any one entry, and the
+    edge goes to File. Only surfaces that are the whole file can be pointed at
+    as themselves.
+    """
+    whole_file = set(surfaces.SEGMENTED_KINDS) | {surfaces.HOOK_TARGET}
+    found: dict[str, int] = {}
+    for row in rows.values():
+        if row["surface_kind"] in whole_file:
+            found.setdefault(row["path"], row["id"])
+    return found
 
 
 def _count(result: RepoResult, path: str, reason: str, detail: str, errored: bool) -> None:
@@ -192,9 +325,18 @@ def _count(result: RepoResult, path: str, reason: str, detail: str, errored: boo
 
 def index_repository(connection, ontology: ontology_module.Ontology, repo: Repository,
                      nested_repos: list[Path]) -> RepoResult:
+    """Index one repository: surfaces, clauses, and the pointers between them.
+
+    Two passes, because a pointer can only be resolved once every surface in the
+    repository has been found. Resolving as the walk goes would make an edge's
+    target depend on directory order -- a link to a file not yet walked would
+    land as unmatched, and the same link would resolve on the next run.
+    """
     surface_node = ontology.nodes[SURFACE_NODE]
     clause_node = ontology.nodes[CLAUSE_NODE]
+    external_node = ontology.nodes[EXTERNAL_REF_NODE]
     contains = ontology.edges[CONTAINS_EDGE]
+    references = ontology.edges[REFERENCES_EDGE]
 
     result = RepoResult(
         repository=repo.name,
@@ -208,6 +350,11 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     rows: dict[int, dict] = {}
     clause_rows: list[dict] = []
     edge_rows: list[dict] = []
+    # Held back for the second pass: the row a pointer leaves from, the path it
+    # was written in, the pointers themselves, and the clause spans to attribute
+    # them to.
+    pending: list[tuple[dict, str, tuple, list]] = []
+
     for candidate in surfaces.walk_repo(repo.root, nested_repos):
         reading = surfaces.read_candidate(candidate)
         detected, notes = surfaces.expand(repo.root, candidate, reading)
@@ -220,29 +367,66 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
             # Segmented from the row that *is* the file. A hook-target row at
             # the same path is the same bytes seen from another angle, and
             # segmenting it too would write every clause twice.
+            spans: list[tuple[int, int, int]] = []
             if reading.text is not None and one.kind in surfaces.SEGMENTED_KINDS:
-                found, edges = _segment(
+                found, edges, spans = _segment(
                     clause_node, contains, repo, row["id"],
                     one.relative_path, reading.text,
                 )
                 clause_rows.extend(found)
                 edge_rows.extend(edges)
+            if one.pointers:
+                pending.append((row, one.relative_path, one.pointers, spans))
         for note in notes:
             _count(result, note.relative_path, note.reason, note.detail, note.errored)
 
+    whole_file = _whole_file_surfaces(rows)
+    external_rows: dict[int, dict] = {}
+    counts: dict[str, int] = {sub_kind: 0 for sub_kind in pointer_module.SUB_KINDS}
+    pointer_rows: list[dict] = []
+    for row, path, found, spans in pending:
+        pointer_rows.extend(
+            _pointer_edges(references, external_node, repo, row, path, found,
+                           spans, whole_file, external_rows, counts)
+        )
+    edge_rows.extend(pointer_rows)
+
     result.clauses = len(clause_rows)
     result.edges = len(edge_rows)
+    result.pointers = len(pointer_rows)
+    result.external_refs = counts
 
+    # Written once per table, not once per shape: CONTAINS and REFERENCES share
+    # gl_context_edge, and a second replace_rows for the same snapshot would
+    # delete what the first just wrote.
+    tables = {shape.table: shape for shape in ontology.tables}
     for shape, written in (
-        (surface_node, list(rows.values())),
-        (clause_node, clause_rows),
-        (contains, edge_rows),
+        (tables[surface_node.table], list(rows.values())),
+        (tables[clause_node.table], clause_rows),
+        (tables[external_node.table], list(external_rows.values())),
+        (tables[contains.table], edge_rows),
     ):
         store.replace_rows(
             connection, shape, LOCAL_TRAVERSAL_PATH, repo.project_id,
-            repo.branch, repo.commit_sha, written,
+            repo.branch, repo.commit_sha,
+            [{name: values.get(name) for name in shape.column_names}
+             for values in written],
         )
     return result
+
+
+def _external_totals(results: list[RepoResult]) -> dict[str, int]:
+    """The three non-resolutions across the estate, each on its own.
+
+    Every sub_kind is present even at zero, and they are never summed: a single
+    total would read as one finding, and they are three different statements
+    about what the detector set could see.
+    """
+    totals = {sub_kind: 0 for sub_kind in pointer_module.SUB_KINDS}
+    for result in results:
+        for sub_kind, count in result.external_refs.items():
+            totals[sub_kind] = totals.get(sub_kind, 0) + count
+    return totals
 
 
 def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
@@ -259,10 +443,13 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
 
     connection = store.connect(db_path)
     try:
+        sources = ontology.table_sources()
         schema = [
             {
                 "table": shape.table,
-                "ontology": str(shape.source_file),
+                # Every file declaring the table, not just the first: a shared
+                # edge table's columns come from several.
+                "ontology": ", ".join(str(path) for path in sources[shape.table]),
                 **store.reconcile(connection, shape),
             }
             for shape in ontology.tables
@@ -302,6 +489,8 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
             "surfaces": sum(result.surfaces for result in results),
             "clauses": sum(result.clauses for result in results),
             "edges": sum(result.edges for result in results),
+            "pointers": sum(result.pointers for result in results),
+            "external_refs": _external_totals(results),
         },
         "processing": {
             "skipped_files": len(skipped),
@@ -319,6 +508,8 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                     "surfaces": result.surfaces,
                     "clauses": result.clauses,
                     "edges": result.edges,
+                    "pointers": result.pointers,
+                    "external_refs": dict(result.external_refs),
                 },
                 "processing": {
                     "skipped_files": len(result.skipped),

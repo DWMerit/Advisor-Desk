@@ -21,6 +21,7 @@ from build_estate import SHARED_INSTRUCTIONS, build
 from orbit_context import clauses, retrieve, store
 from orbit_context.indexer import index
 from orbit_context.ontology import load
+from orbit_context.workspace import project_id_from_path
 
 # Three headings deep, and the second rule under the deepest of them.
 DEEP_FQN = (
@@ -130,8 +131,14 @@ class TestClausesLand(EstateTestCase):
         self.assertEqual(rows[0], ("list-rule", "Cast-in channel"))
 
     def test_statistics_count_clauses_and_edges(self):
+        # One CONTAINS edge per clause. The edge total is larger because
+        # gl_context_edge also holds the REFERENCES edges of ticket 04.
         self.assertGreater(self.stats["graph"]["clauses"], 0)
-        self.assertEqual(self.stats["graph"]["edges"], self.stats["graph"]["clauses"])
+        contains = self.query(
+            "SELECT count(*) FROM gl_context_edge WHERE relationship_kind = 'CONTAINS'"
+        )[0][0]
+        self.assertEqual(contains, self.stats["graph"]["clauses"])
+        self.assertGreaterEqual(self.stats["graph"]["edges"], contains)
 
     def test_only_whole_file_text_surfaces_are_segmented(self):
         paths = {row[0] for row in self.query("SELECT DISTINCT surface_path FROM gl_context_clause")}
@@ -164,10 +171,13 @@ class TestClausesLand(EstateTestCase):
         finally:
             connection.close()
 
+        # Scoped to alpha: three repositories hold a `CLAUDE.md`, and slicing
+        # one repository's bytes at another's offsets compares nothing.
         raw = (self.alpha / "CLAUDE.md").read_bytes()
         rows = self.query(
             "SELECT *, start_byte, end_byte FROM gl_context_clause "
-            "WHERE surface_path = 'CLAUDE.md'"
+            "WHERE surface_path = 'CLAUDE.md' AND project_id = ?",
+            [project_id_from_path(str(self.alpha))],
         )
         self.assertGreater(len(rows), 0)
         for row in rows:
@@ -233,10 +243,11 @@ class TestContainsEdges(EstateTestCase):
         )
         self.assertEqual(rows[0][0], 0)
 
-    def test_every_edge_target_is_a_clause_row(self):
+    def test_every_contains_edge_target_is_a_clause_row(self):
         rows = self.query(
             "SELECT count(*) FROM gl_context_edge e "
-            "LEFT JOIN gl_context_clause c ON c.id = e.target_id WHERE c.id IS NULL"
+            "LEFT JOIN gl_context_clause c ON c.id = e.target_id "
+            "WHERE e.relationship_kind = 'CONTAINS' AND c.id IS NULL"
         )
         self.assertEqual(rows[0][0], 0)
 

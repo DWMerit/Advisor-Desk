@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
+from . import pointers as pointer_module
 from . import settings as settings_module
 from .jsonloc import JsonLocationError, parse as parse_json
 
@@ -155,6 +156,10 @@ class Detected:
     # tells two entries apart when the row id is derived, and a settings file
     # written on one line would otherwise collapse all its hooks into one row.
     start_offset: int | None = None
+    # The addresses written inside this surface, unresolved. Not columns either:
+    # each becomes a row of its own in `gl_context_edge`, and resolving them
+    # needs every surface in the repository to have been found first.
+    pointers: tuple[pointer_module.Pointer, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -361,6 +366,7 @@ def _file_row(candidate: Candidate, reading: Reading, frontmatter: Frontmatter,
         name=name,
         frontmatter_bytes=frontmatter.frontmatter_bytes,
         body_bytes=frontmatter.body_bytes,
+        pointers=tuple(pointer_module.extract(reading.text or "")),
     )
 
 
@@ -389,6 +395,9 @@ def _expand_container(repo_root: Path, candidate: Candidate,
                 target_path=target_path or "",
                 target_resolution=resolution,
                 start_offset=entry.node.start,
+                pointers=tuple(
+                    pointer_module.extract_config(document, entry.node, repo_root)
+                ),
             )
         )
         if target_path is not None:
@@ -407,6 +416,9 @@ def _expand_container(repo_root: Path, candidate: Candidate,
                 start_line=start_line,
                 end_line=end_line,
                 start_offset=server.node.start,
+                pointers=tuple(
+                    pointer_module.extract_config(document, server.node, repo_root)
+                ),
             )
         )
 

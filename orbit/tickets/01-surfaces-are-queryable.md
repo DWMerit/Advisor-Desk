@@ -16,12 +16,19 @@ The tracer bullet. Deliberately the heaviest ticket, because it carries the full
 
 ## Acceptance
 
-- [ ] `orbit local sql --db ~/.orbit-context/context.duckdb "SELECT path, surface_kind, size_bytes FROM gl_context_surface"` returns rows
-- [ ] With `ATTACH '<their file>' AS orbit (READ_ONLY)`, a join from `gl_context_surface` to `orbit.gl_file` on `path` returns rows for a repo indexed by both tools
-- [ ] `orbit sql` and `orbit index` keep working **while** our indexer holds its write lock
-- [ ] Adding a column to the YAML changes the table without touching Python
-- [ ] Re-running the index does not duplicate rows
-- [ ] Statistics JSON reports a non-zero skipped or errored count on a fixture containing a binary file
+- [x] `orbit local sql --db ~/.orbit-context/context.duckdb "SELECT path, surface_kind, size_bytes FROM gl_context_surface"` returns rows
+- [x] With `ATTACH '<their file>' AS orbit (READ_ONLY)`, a join from `gl_context_surface` to `orbit.gl_file` on `path` returns rows for a repo indexed by both tools
+- [x] `orbit sql` and `orbit index` keep working **while** our indexer holds its write lock
+- [x] Adding a column to the YAML changes the table without touching Python
+- [x] Re-running the index does not duplicate rows
+- [x] Statistics JSON reports a non-zero skipped or errored count on a fixture containing a binary file
+
+Each is pinned by test in `orbit/tests/`: `test_index.py` for the query, the
+re-index and the statistics, `test_ontology.py` for the YAML-driven column,
+`test_join.py` for the attach and the lock. The join runs against a `gl_file`
+table built from the DDL of a graph written by `orbit 0.118.1`, in its own
+file, attached read-only — so it holds without a live Orbit install, and it is
+their column shape being joined, not an approximation of it.
 
 ## Watch for
 

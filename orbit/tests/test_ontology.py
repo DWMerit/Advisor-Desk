@@ -14,7 +14,7 @@ import yaml
 from . import support
 
 from orbit_context import store
-from orbit_context.ontology import OntologyError, load_domain, load_node
+from orbit_context.ontology import OntologyError, load, load_domain, load_node
 
 
 class TestSurfaceYaml(unittest.TestCase):
@@ -96,6 +96,67 @@ class TestAddingAColumn(unittest.TestCase):
         self._add_column("weird", storage_type="Decimal(38, 2)")
         with self.assertRaises(OntologyError):
             load_domain(self.ontology)
+
+
+class TestASharedEdgeTable(unittest.TestCase):
+    """Two edge types, one table. The table has to be the union of both files.
+
+    Taking the first declaring file and stopping would leave the second's
+    columns uncreated, and every write of them would fail -- on whichever file
+    happened to load second, which is a filename ordering deciding a schema.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-shared-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.ontology = self.tmp / "ontology"
+        shutil.copytree(support.ONTOLOGY_ROOT, self.ontology)
+        self.references = self.ontology / "edges" / "context" / "references.yaml"
+
+    def table(self, root):
+        shape, = [s for s in load(root).tables if s.table == "gl_context_edge"]
+        return shape
+
+    def test_both_files_reach_the_table(self):
+        columns = self.table(self.ontology).column_names
+        # Declared by both.
+        self.assertIn("source_id", columns)
+        # Declared only by references.yaml.
+        for name in ("subtype", "source_path", "source_line", "target_address",
+                     "in_code_fence"):
+            self.assertIn(name, columns)
+
+    def test_a_column_declared_twice_appears_once(self):
+        columns = self.table(self.ontology).column_names
+        self.assertEqual(len(columns), len(set(columns)))
+
+    def test_a_column_two_files_disagree_about_is_rejected(self):
+        document = yaml.safe_load(self.references.read_text(encoding="utf-8"))
+        for entry in document["storage"]["columns"]:
+            if entry["name"] == "source_id":
+                entry["type"] = "String"
+        self.references.write_text(yaml.safe_dump(document, sort_keys=False),
+                                   encoding="utf-8")
+        with self.assertRaises(OntologyError):
+            self.table(self.ontology)
+
+    def test_a_table_built_before_the_second_file_gains_its_columns(self):
+        # The migration a live graph takes: the table exists from CONTAINS
+        # alone, and adding references.yaml has to reach it by ALTER.
+        held = self.references.read_text(encoding="utf-8")
+        self.references.unlink()
+        db = self.tmp / "graph.duckdb"
+        connection = store.connect(db)
+        store.reconcile(connection, self.table(self.ontology))
+        self.assertNotIn("subtype", store.existing_columns(connection, "gl_context_edge"))
+        connection.close()
+
+        self.references.write_text(held, encoding="utf-8")
+        connection = store.connect(db)
+        outcome = store.reconcile(connection, self.table(self.ontology))
+        self.assertIn("subtype", outcome["columns_added"])
+        self.assertIn("subtype", store.existing_columns(connection, "gl_context_edge"))
+        connection.close()
 
 
 class TestOntologyErrors(unittest.TestCase):

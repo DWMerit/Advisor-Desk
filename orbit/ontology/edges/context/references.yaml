@@ -1,0 +1,181 @@
+# orbit/ontology/edges/context/references.yaml
+#
+# One edge type, many from/to pairs, in GitLab's edge format. REFERENCES already
+# exists in their ontology; here it carries governance pointers -- one row per
+# place a surface or a clause names something else.
+#
+# It shares gl_context_edge with CONTAINS, which is what an edge table is for.
+# The columns below that CONTAINS does not carry are declared nullable: a
+# containment edge has no detector and no address, and NULL is the honest value
+# for a fact the row does not hold.
+#
+# Variants beyond the ones the spec's table lists (Clause -> File,
+# Clause -> ExternalRef) are here because ticket 04 extracts pointers from
+# clauses as well as surfaces, and a pointer's source is the innermost clause
+# holding it. A clause pointing outside the indexed root is the same edge as a
+# surface pointing outside it, seen at the granularity that can say which rule
+# did the pointing.
+#
+# File is Orbit's own gl_file, in their database, not a row this indexer writes.
+# See target_id.
+
+edge_type: REFERENCES
+domain: context
+description: A surface or clause names something else -- a link, an import, a config value, a path in prose, or a supersession the estate declares
+destination_table: gl_context_edge
+
+variants:
+  - from_node: Surface
+    to_node: Surface
+    description: A pointer that landed on an indexed governance surface.
+  - from_node: Surface
+    to_node: File
+    description: A pointer that landed on a file in the tree that is not a governance surface. File is Orbit's own node type, joined by path.
+  - from_node: Surface
+    to_node: ExternalRef
+    description: A pointer that did not resolve inside the repository root.
+  - from_node: Clause
+    to_node: Surface
+    description: As Surface -> Surface, attributed to the clause the pointer sits in.
+  - from_node: Clause
+    to_node: File
+    description: As Surface -> File, attributed to the clause the pointer sits in.
+  - from_node: Clause
+    to_node: ExternalRef
+    description: As Surface -> ExternalRef, attributed to the clause the pointer sits in.
+
+properties:
+  source_id:
+    type: int64
+    source: source_id
+    nullable: false
+    mutable: false
+    description: "id of the row the edge leaves -- the innermost clause holding the pointer, or the surface where no clause holds it."
+
+  source_kind:
+    type: string
+    source: source_kind
+    nullable: false
+    mutable: false
+    description: "Node type of the source row -- the variant's from_node."
+    selectivity: low
+
+  relationship_kind:
+    type: string
+    source: relationship_kind
+    nullable: false
+    mutable: false
+    description: "The edge type. REFERENCES here."
+    selectivity: low
+
+  target_id:
+    type: int64
+    source: target_id
+    nullable: false
+    mutable: false
+    description: "id of the row the edge enters. For a Surface or ExternalRef target it is that row's id in this graph. For a File target the row lives in Orbit's gl_file, in their database, and their ids are not ours -- so this is a deterministic handle over the snapshot and the path, and the join that crosses graphs goes by target_path, the way the attached-read-only join in the spec does."
+
+  target_kind:
+    type: string
+    source: target_kind
+    nullable: false
+    mutable: false
+    description: "Node type of the row the edge enters -- the variant's to_node."
+    selectivity: low
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID. Carried on the edge for the same reason the nodes carry it: every local row shares the empty traversal_path, so this is what tells two repositories apart, and it is half the key a re-index replaces rows by."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Git branch."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    mutable: false
+    description: "Indexed commit SHA."
+
+  subtype:
+    type: string
+    source: subtype
+    nullable: true
+    mutable: false
+    description: "Which detector found the pointer: markdown-link | frontmatter-field | import-statement | config-value | bare-path-literal | supersedes-claim. NULL on edge types that carry no detector, CONTAINS among them. supersedes-claim is a claim the estate makes, in the estate's own words, and is recorded as that and only that -- a superseded surface that is still loaded is the pair of facts, never a finding derived from them."
+    selectivity: low
+
+  source_path:
+    type: string
+    source: source_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path of the file the pointer was written in. With source_line it is the file:line locator every pointer edge carries, so a report can cite the pointer without joining back to the source row. NULL on edge types that carry no locator."
+
+  source_line:
+    type: int64
+    source: source_line
+    nullable: true
+    mutable: false
+    description: "1-based line the pointer was written on. NULL on edge types that carry no locator."
+
+  target_address:
+    type: string
+    source: target_address
+    nullable: true
+    mutable: false
+    description: "The pointer target exactly as the estate wrote it, before expansion or normalisation -- kept beside target_path so what was written and where it landed can be read apart. The estate's own words. NULL on edge types that carry no address."
+
+  target_path:
+    type: string
+    source: target_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path the pointer resolved to. Empty where it did not resolve inside the repository root, in which case the target is an ExternalRef carrying the reason. NULL on edge types that carry no address."
+
+  in_code_fence:
+    type: bool
+    source: in_code_fence
+    nullable: true
+    mutable: false
+    description: "True where the pointer was written inside a fenced code block. Recorded and labelled, never dropped: a path in a fenced block is a pointer the estate wrote down, and whether it was written as an example is a judgement this indexer does not make. Inline backticks are not a fence -- a path in backticks is an ordinary pointer and resolves like one. NULL on edge types that carry no address."
+    selectivity: low
+
+storage:
+  settings:
+    index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: source_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: source_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: subtype, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: source_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: source_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: target_address, type: "String", codec: ["ZSTD(3)"]}
+    - {name: target_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: in_code_fence, type: "Bool", codec: ["LZ4"]}
+  indexes:
+    - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_target_address, column: target_address, type: "text(tokenizer = splitByString(['/']))", granularity: 1}

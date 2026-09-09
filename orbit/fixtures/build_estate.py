@@ -52,6 +52,48 @@ SHARED_INSTRUCTIONS = (
 BINARY_SURFACE = b"\xff\xfe\x00\x01rules\x80\x81\x82"
 
 
+# One of every pointer detector, and one of every non-resolution, written the
+# way an estate writes them: a link, a path in backticks, an import, a URL, a
+# path that leaves the repository, a path that is simply not there, a
+# supersession the estate declares, and a path inside a fenced block that is an
+# example rather than an instruction -- flagged, never dropped.
+POINTER_SURFACE = """# Gamma
+
+The instruction surface.
+
+## Pointers this estate writes down
+
+- The anchor rules live in [the anchor skill](.claude/skills/anchor-schedule/SKILL.md).
+- The pre-tool hook is `.claude/hooks/check-anchors.sh`, run before every Bash call.
+- Pricing comes from @docs/price-book.md, pulled in at the top of every session.
+- The published spacing table is [on the web](https://example.invalid/anchors/spacing.html).
+- The beta estate keeps its own instructions at ../beta/AGENTS.md.
+- Older sessions read docs/absent-rules.md, which is not a file in this repository.
+
+## Supersession, as the estate states it
+
+This file supersedes .claude/commands/price-check.md for pricing questions.
+
+## An example, not an instruction
+
+```sh
+orbit-context show 'CLAUDE.md#Gamma#An example, not an instruction'
+```
+"""
+
+COMMAND_WITH_FRONTMATTER = """---
+description: Re-price the marked-up set.
+reads: docs/price-book.md
+---
+
+Re-price the marked-up set against the price book.
+"""
+
+PRICE_BOOK = """# Price book
+
+Rates are per metre, excluding fixings.
+"""
+
 SKILL_WITH_FRONTMATTER = """---
 name: anchor-schedule
 description: Read anchor spacing off the drawing, never off the schedule.
@@ -169,7 +211,11 @@ def build(destination: str | Path | None = None) -> Path:
 
 def _build_gamma(root: Path) -> None:
     """One of every governance object, so all surface kinds appear at once."""
-    _write(root / "CLAUDE.md", "# Gamma\nThe instruction surface.\n")
+    _write(root / "CLAUDE.md", POINTER_SURFACE)
+
+    # Named by a frontmatter field and by an import, and not a governance
+    # surface itself -- so a pointer to it is an edge to Orbit's own File.
+    _write(root / "docs" / "price-book.md", PRICE_BOOK)
 
     # skill-package: a directory holding SKILL.md, declaring name and
     # description. The frontmatter loads at boot; the body only on invocation,
@@ -189,7 +235,7 @@ def _build_gamma(root: Path) -> None:
     _write(root / ".claude" / "agents" / "scratch.md", "Just notes, no frontmatter.\n")
 
     # command-definition, at the top level and namespaced by a subdirectory.
-    _write(root / ".claude" / "commands" / "price-check.md", "Re-price the marked-up set.\n")
+    _write(root / ".claude" / "commands" / "price-check.md", COMMAND_WITH_FRONTMATTER)
     _write(root / ".claude" / "commands" / "takeoff" / "count.md", "Count the symbols.\n")
 
     # hook-definition, and the script one of them resolves to.

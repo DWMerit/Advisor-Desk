@@ -17,10 +17,12 @@ attaches. Orbit's CLI reads one file or the other.
 
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
 
-Phase 1, tickets 01–03. Two node types and one edge type. `Surface` covers every
-governance object — instruction surfaces, skill packages, agent definitions,
-slash commands, hook definitions and MCP servers. `Clause` is one addressable
-fragment inside a surface, and `CONTAINS` holds the two together.
+Phase 1, tickets 01–04. Three node types and two edge types. `Surface` covers
+every governance object — instruction surfaces, skill packages, agent
+definitions, slash commands, hook definitions and MCP servers. `Clause` is one
+addressable fragment inside a surface, and `CONTAINS` holds the two together.
+`REFERENCES` is one pointer a surface or clause writes down, and `ExternalRef` is
+where a pointer lands when it lands outside the graph.
 
 ## Run it
 
@@ -84,6 +86,32 @@ orbit local sql "WITH RECURSIVE walk(id, depth) AS (
                  SELECT c.surface_path, max(walk.depth) AS deepest
                  FROM walk JOIN gl_context_clause c ON c.id = walk.id
                  GROUP BY 1 ORDER BY 2 DESC"
+
+# The three negative findings, kept apart. One row per address, not per mention.
+orbit local sql "SELECT sub_kind, count(*) AS addresses
+                 FROM gl_context_external_ref GROUP BY 1 ORDER BY 2 DESC"
+
+# Which rule points where, with the locator and whether it sat in a fenced block.
+orbit local sql "SELECT source_path || ':' || source_line AS locator, subtype,
+                        target_address, target_kind, target_path, in_code_fence
+                 FROM gl_context_edge
+                 WHERE relationship_kind = 'REFERENCES' ORDER BY locator"
+
+# Every address named in the estate that no file here matches, and who names it.
+orbit local sql "SELECT x.address, count(*) AS mentions,
+                        min(e.source_path || ':' || e.source_line) AS first_written
+                 FROM gl_context_external_ref x
+                 JOIN gl_context_edge e ON e.target_id = x.id
+                 WHERE x.sub_kind = 'no-indexed-target-match'
+                 GROUP BY 1 ORDER BY 2 DESC"
+
+# What the estate declares superseded, beside the surface that still loads.
+orbit local sql "SELECT e.source_path || ':' || e.source_line AS claimed_at,
+                        e.target_address, s.surface_kind, s.size_bytes
+                 FROM gl_context_edge e
+                 LEFT JOIN gl_context_surface s
+                   ON s.path = e.target_path AND s.project_id = e.project_id
+                 WHERE e.subtype = 'supersedes-claim'"
 ```
 
 Requires Python 3 and `duckdb`; `pyyaml` for reading the ontology and
@@ -124,7 +152,7 @@ alone will match a same-named file in a different repository. Join on
 
 ## The table comes from the YAML
 
-Three files, in GitLab's own tree shape, each copied from the shape of one of
+Five files, in GitLab's own tree shape, each copied from the shape of one of
 theirs, so any of them can be overlaid onto their ontology tree or contributed
 upstream unchanged:
 
@@ -132,7 +160,16 @@ upstream unchanged:
 |---|---|---|
 | `ontology/nodes/context/surface.yaml` | `nodes/source_code/file.yaml` | `gl_context_surface` |
 | `ontology/nodes/context/clause.yaml` | `nodes/source_code/definition.yaml` | `gl_context_clause` |
+| `ontology/nodes/context/external_ref.yaml` | their node format | `gl_context_external_ref` |
 | `ontology/edges/context/contains.yaml` | their edge format, with `variants` | `gl_context_edge` |
+| `ontology/edges/context/references.yaml` | their edge format, with `variants` | `gl_context_edge` |
+
+Two edge types share `gl_context_edge`, which is what an edge table is for, and
+they do not carry the same columns: `CONTAINS` holds only the endpoints, while
+`REFERENCES` also holds a detector, a locator and an address. The table is the
+**union** of both files' columns, and a column two files declare differently
+fails the index rather than one of them silently winning. The columns one edge
+type does not carry are NULL on its rows.
 
 The indexer builds each DuckDB table from that file's `storage.columns`. Adding a
 column to the YAML adds it to the table on the next index; no Python change.
@@ -296,6 +333,74 @@ estate, and are never merged.
 `matcher` is NULL where the entry declares no matcher key, and empty where it
 declares an empty one.
 
+## Pointers, and the three ways one does not resolve
+
+A surface names other things, and each naming is one `REFERENCES` row carrying a
+`file:line` locator, the address **as the estate wrote it**, and where it landed.
+Six detectors, each recorded as the edge's `subtype`:
+
+| `subtype` | What it reads |
+|---|---|
+| `markdown-link` | `[text](target)`, an image, an autolink, a reference definition |
+| `frontmatter-field` | a path written in the leading `---` block |
+| `import-statement` | `@path` — what an import means in a prose estate |
+| `config-value` | a path inside a hook or MCP entry in a settings file |
+| `bare-path-literal` | a path written in prose, in backticks or not |
+| `supersedes-claim` | a path on a line where the estate declares a supersession |
+
+A pointer that lands on a governance surface points at that `Surface` row. One
+that lands on any other file in the tree points at Orbit's own `File` — their
+row, in their database — so the edge carries `target_path` and the join that
+crosses graphs goes by path. Everything else becomes an `ExternalRef`:
+
+| `sub_kind` | Means |
+|---|---|
+| `outside-indexed-roots` | The address resolved above the repository root. A sibling repository in the same estate is outside it: a different snapshot, with its own branch and commit. |
+| `no-indexed-target-match` | The address stayed inside the root and no file was there. |
+| `unresolvable-scheme` | The address named a URI scheme, so nothing on this filesystem is being pointed at. |
+
+**Never merged.** Each is a statement about the detector set, not about the file,
+and one total would say none of the three. One `ExternalRef` row per address,
+however many edges enter it — an address named forty times is one finding.
+
+A pointer is attributed to the **innermost clause** holding it, so "which rule
+points at this" is answerable. Text above the first heading sits in no clause and
+is attributed to the surface.
+
+Three addresses are recorded as nothing at all, because each names something
+other than a file: an anchor in the same document, a value still carrying an
+unexpanded variable, and a directory that exists. They are stated limits of the
+detector set rather than findings — phase 1 has no node for a directory, and a
+place that is there is not a file that is not.
+
+### `supersedes-claim` is a claim
+
+It is DECLARED, permanently. A surface the estate says is superseded and that
+still loads is reported as **that pair of facts** — the claim, with its locator,
+and the surface row still standing. Nothing here derives a third fact from them.
+
+### Boundary handling is the whole game
+
+A backtick in a negative lookbehind does **not** skip inline code. It shifts the
+match *start* into the middle of the token, so a valid path in backticks matches
+as a truncated fragment that then cannot resolve. On one real repository that
+produced **1,349 phantom findings out of 1,373** — ninety-six percent of the
+report was the tool talking about itself.
+
+So every prose detector starts from a **consumed** boundary: line start, or one
+of whitespace `` ` `` `'` `"` `(` `<` `[`. A leading `/` is excluded, so the path
+half of a URL is not re-matched as a bare path. A path is a pointer only if it
+carries a file extension, and either a `/` or an extension the indexer
+recognises, which is what keeps `0.118.1` and `SipHash-1-3` out of the report.
+Sentence punctuation is trimmed off the end, or `../beta/AGENTS.md.` closing a
+sentence would be captured with the full stop and then fail its own shape test.
+
+Measured on this repository's 208 Markdown files: **2,094 pointers, 1,831
+resolved, 52 distinct `no-indexed-target-match` addresses**, and every one of the
+52 a path the estate actually wrote. If a run comes back with unmatched pointers
+in the thousands, the detector is wrong, not the estate — which is what
+`orbit/tests/test_pointers.py` asserts, over this repository, on every run.
+
 ## Coverage is a record, not a footnote
 
 Every candidate becomes a row, including ones that could not be read. The
@@ -323,7 +428,9 @@ absent:
 
 `index` prints JSON in Orbit's shape — `repository`, `path`, `time_seconds`,
 `graph`, `processing`, `database_path`, and `detailed` under `--stats`. `graph`
-counts `repositories`, `surfaces`, `clauses` and `edges`. Skipped entries carry
+counts `repositories`, `surfaces`, `clauses`, `edges` and `pointers`, and reports
+`external_refs` as the three `sub_kind` counts separately, always all three, even
+at zero. Skipped entries carry
 `reason`, errored entries carry `kind`, matching their `SkippedFile` and
 `ErroredFile`. A `repositories` array itemises each repository found under the
 indexed root, and `schema` reports, per table, which columns the YAML added and
@@ -332,8 +439,10 @@ which the table carries that the YAML does not declare.
 ## Re-indexing
 
 Re-indexing replaces the rows for the indexed
-`(traversal_path, project_id, branch, commit_sha)` — in all three tables — rather
-than adding a second copy. `project_id` is part of that key because every local row carries the same
+`(traversal_path, project_id, branch, commit_sha)` — in all four tables — rather
+than adding a second copy. Once per *table*, not once per ontology shape: two
+edge types share `gl_context_edge`, and a second replacement for the same
+snapshot would delete what the first had just written. `project_id` is part of that key because every local row carries the same
 empty `traversal_path`. Row ids are derived from the same tuple plus the path,
 so they are stable across re-index.
 

@@ -241,17 +241,57 @@ class Ontology:
     edges: dict[str, EdgeType]
 
     @property
-    def tables(self) -> tuple[TableShape, ...]:
-        """Every shape that needs a table, one per table.
+    def shapes(self) -> tuple[TableShape, ...]:
+        """Every node and edge type, in load order."""
+        return (*self.nodes.values(), *self.edges.values())
 
-        Edge types share a destination table -- their whole point -- so the
-        first declaring shape stands for the table and later ones are folded in
-        only if they add columns.
+    def table_sources(self) -> dict[str, tuple[Path, ...]]:
+        """The ontology files that declare each table, in load order."""
+        sources: dict[str, list[Path]] = {}
+        for shape in self.shapes:
+            sources.setdefault(shape.table, []).append(shape.source_file)
+        return {table: tuple(paths) for table, paths in sources.items()}
+
+    @property
+    def tables(self) -> tuple[TableShape, ...]:
+        """Every shape that needs a table, one per table, columns merged.
+
+        Edge types share a destination table -- their whole point -- and they do
+        not all carry the same columns: CONTAINS holds only the endpoints, while
+        REFERENCES also holds a detector, a locator and an address. The table has
+        to be the union, or the columns of whichever file happened to load second
+        are silently never created and every write of them fails.
+
+        A column declared in two files must agree in both. Two files disagreeing
+        about a column's type is a contradiction in the ontology, and the table
+        can only be built from one of them, so it is raised rather than resolved.
         """
-        seen: dict[str, TableShape] = {}
-        for shape in (*self.nodes.values(), *self.edges.values()):
-            seen.setdefault(shape.table, shape)
-        return tuple(seen.values())
+        merged: dict[str, dict[str, Column]] = {}
+        for shape in self.shapes:
+            columns = merged.setdefault(shape.table, {})
+            for column in shape.columns:
+                declared = columns.get(column.name)
+                if declared is not None and declared != column:
+                    raise OntologyError(
+                        f"{shape.source_file}: {shape.table}.{column.name} is "
+                        f"declared as {column.duckdb_type}"
+                        f"{'' if column.nullable else ' NOT NULL'} here and as "
+                        f"{declared.duckdb_type}"
+                        f"{'' if declared.nullable else ' NOT NULL'} in another "
+                        f"ontology file for the same table"
+                    )
+                columns[column.name] = column
+        first: dict[str, TableShape] = {}
+        for shape in self.shapes:
+            first.setdefault(shape.table, shape)
+        return tuple(
+            TableShape(
+                table=table,
+                columns=tuple(merged[table].values()),
+                source_file=first[table].source_file,
+            )
+            for table in merged
+        )
 
 
 def load(root: str | Path | None = None, domain: str = "context") -> Ontology:
