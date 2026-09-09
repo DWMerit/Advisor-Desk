@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import clauses as clause_module
+from . import detectors
 from . import ontology as ontology_module
 from . import pointers as pointer_module
 from . import provenance as provenance_module
@@ -27,6 +28,11 @@ from .workspace import (
 SURFACE_NODE = "Surface"
 CLAUSE_NODE = "Clause"
 EXTERNAL_REF_NODE = "ExternalRef"
+# Two tables that record the walk rather than what it found. Neither carries
+# edges: without them a count of surfaces has no denominator and no detector
+# set beside it, and `repo-map` would have to re-walk the tree to invent both.
+INDEX_RUN_NODE = "IndexRun"
+COVERAGE_NOTE_NODE = "CoverageNote"
 CONTAINS_EDGE = "CONTAINS"
 REFERENCES_EDGE = "REFERENCES"
 IDENTICAL_BYTES_EDGE = provenance_module.IDENTICAL_BYTES_EDGE
@@ -58,6 +64,13 @@ class RepoResult:
     identical_bytes: dict = field(default_factory=dict)
     skipped: list[dict] = field(default_factory=list)
     errored: list[dict] = field(default_factory=list)
+    # The same outcomes as skipped and errored, in one uniform shape for the
+    # coverage table. Kept separate so the JSON statistics keep the shape
+    # Orbit's own `index` output uses.
+    coverage: list[dict] = field(default_factory=list)
+    # The walk, and how much of it these detectors recognise anything in.
+    files_walked: int = 0
+    files_with_surface_kind: int = 0
 
 
 _DIGESTS: dict[tuple, str] = {}
@@ -377,18 +390,74 @@ def _count(result: RepoResult, path: str, reason: str, detail: str, errored: boo
 
     A row that indexed is counted; a row or note that did not carries its
     reason, so a surface that is present but unindexed does not read as one
-    that is absent.
+    that is absent. The same outcome is recorded a second time in the uniform
+    shape the coverage table takes, because a reason printed to stdout and
+    thrown away reads afterwards as a surface that was never there.
     """
     if not reason:
         result.surfaces += 1
-    elif errored:
+        return
+    if errored:
         result.errored.append({"path": path, "kind": reason, "detail": detail})
     else:
         result.skipped.append({"path": path, "reason": reason, "detail": detail})
+    result.coverage.append(
+        {"path": path, "reason": reason, "detail": detail, "errored": errored}
+    )
+
+
+def _run_row(node: NodeType, repo: Repository, indexed_root: Path,
+             files_walked: int, files_with_surface_kind: int) -> dict:
+    """The one row saying what this run covered, and which detectors read it.
+
+    ``files_with_surface_kind`` counts distinct paths, not rows: a settings file
+    holds a row per hook, and counting rows against a denominator of files would
+    put coverage above one on an estate with enough hooks.
+    """
+    values = {
+        "id": stable_id(repo.project_id, repo.branch, repo.commit_sha, INDEX_RUN_NODE),
+        "traversal_path": LOCAL_TRAVERSAL_PATH,
+        "project_id": repo.project_id,
+        "branch": repo.branch,
+        "commit_sha": repo.commit_sha,
+        "path": str(repo.root),
+        "indexed_root": str(indexed_root),
+        "detector_set_version": detectors.VERSION,
+        "excluded_directories": ", ".join(sorted(surfaces.PRUNED_DIRECTORIES)),
+        "files_walked": files_walked,
+        "files_with_surface_kind": files_with_surface_kind,
+    }
+    return {name: values.get(name) for name in node.column_names}
+
+
+def _coverage_rows(node: NodeType, repo: Repository,
+                   entries: list[dict]) -> list[dict]:
+    """One row per file the walk reached and did not fully index.
+
+    Keyed by path and reason, so a file reached twice under the same reason is
+    one row. Two reasons for one file stay two rows: they are two findings.
+    """
+    rows: dict[int, dict] = {}
+    for entry in entries:
+        values = {
+            "id": stable_id(repo.project_id, repo.branch, repo.commit_sha,
+                            COVERAGE_NOTE_NODE, entry["path"], entry["reason"]),
+            "traversal_path": LOCAL_TRAVERSAL_PATH,
+            "project_id": repo.project_id,
+            "branch": repo.branch,
+            "commit_sha": repo.commit_sha,
+            "path": entry["path"],
+            "reason": entry["reason"],
+            "detail": entry["detail"],
+            "errored": entry["errored"],
+        }
+        rows.setdefault(values["id"], {name: values.get(name) for name in node.column_names})
+    return list(rows.values())
 
 
 def index_repository(connection, ontology: ontology_module.Ontology, repo: Repository,
-                     nested_repos: list[Path]) -> RepoResult:
+                     nested_repos: list[Path],
+                     indexed_root: Path | None = None) -> RepoResult:
     """Index one repository: surfaces, clauses, and the pointers between them.
 
     Two passes, because a pointer can only be resolved once every surface in the
@@ -399,6 +468,8 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     surface_node = ontology.nodes[SURFACE_NODE]
     clause_node = ontology.nodes[CLAUSE_NODE]
     external_node = ontology.nodes[EXTERNAL_REF_NODE]
+    run_node = ontology.nodes[INDEX_RUN_NODE]
+    coverage_node = ontology.nodes[COVERAGE_NOTE_NODE]
     contains = ontology.edges[CONTAINS_EDGE]
     references = ontology.edges[REFERENCES_EDGE]
     identical_bytes = ontology.edges[IDENTICAL_BYTES_EDGE]
@@ -471,6 +542,10 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     edge_rows.extend(_identical_byte_edges(identical_bytes, repo, matched))
     edge_rows.extend(_produces_edges(produces, repo, productions))
 
+    result.files_walked = len(walked)
+    # Distinct paths, not rows. A settings file is one file however many hooks
+    # it holds, and a hook target is the same file seen from another angle.
+    result.files_with_surface_kind = len({row["path"] for row in rows.values()})
     result.clauses = len(clause_rows)
     result.edges = len(edge_rows)
     result.pointers = len(pointer_rows)
@@ -486,6 +561,11 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
         (tables[clause_node.table], clause_rows),
         (tables[external_node.table], list(external_rows.values())),
         (tables[contains.table], edge_rows),
+        (tables[run_node.table],
+         [_run_row(run_node, repo, indexed_root or repo.root,
+                   result.files_walked, result.files_with_surface_kind)]),
+        (tables[coverage_node.table],
+         _coverage_rows(coverage_node, repo, result.coverage)),
     ):
         store.replace_rows(
             connection, shape, LOCAL_TRAVERSAL_PATH, repo.project_id,
@@ -508,6 +588,28 @@ def _external_totals(results: list[RepoResult]) -> dict[str, int]:
         for sub_kind, count in result.external_refs.items():
             totals[sub_kind] = totals.get(sub_kind, 0) + count
     return totals
+
+
+def _coverage(files_walked: int, files_with_surface_kind: int) -> dict:
+    """The denominator beside the numerator, always both.
+
+    A surface count on its own cannot be read: twelve surfaces out of fourteen
+    files and twelve out of 1,775 are the same number about two different
+    estates. The second figure is what makes a thin result read as "these
+    detectors recognise little here" rather than as a description of the estate.
+    """
+    return {
+        "files_walked": files_walked,
+        "files_with_surface_kind": files_with_surface_kind,
+        "files_with_no_surface_kind": files_walked - files_with_surface_kind,
+    }
+
+
+def _coverage_totals(results: list[RepoResult]) -> dict:
+    return _coverage(
+        sum(result.files_walked for result in results),
+        sum(result.files_with_surface_kind for result in results),
+    )
 
 
 def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
@@ -546,7 +648,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                      "detail": str(error)}
                 )
                 continue
-            results.append(index_repository(connection, ontology, repo, nested))
+            results.append(index_repository(connection, ontology, repo, nested, root))
     finally:
         connection.close()
 
@@ -565,6 +667,10 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
         "repository": root.name,
         "path": str(root),
         "time_seconds": round(elapsed, 4),
+        # The detector set every count below was produced by. Recorded on each
+        # snapshot's run row as well, so a count read back out of the graph
+        # months later still carries the version that produced it.
+        "detector_set_version": detectors.VERSION,
         "graph": {
             "repositories": len(results),
             "surfaces": sum(result.surfaces for result in results),
@@ -576,6 +682,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                 [result.identical_bytes for result in results]
             ),
         },
+        "coverage": _coverage_totals(results),
         "processing": {
             "skipped_files": len(skipped),
             "errored_files": len(errored),
@@ -596,6 +703,8 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                     "external_refs": dict(result.external_refs),
                     "identical_bytes": dict(result.identical_bytes),
                 },
+                "coverage": _coverage(result.files_walked,
+                                      result.files_with_surface_kind),
                 "processing": {
                     "skipped_files": len(result.skipped),
                     "errored_files": len(result.errored),

@@ -17,14 +17,17 @@ attaches. Orbit's CLI reads one file or the other.
 
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
 
-Phase 1, tickets 01–05. Three node types and four edge types. `Surface` covers
+Phase 1, tickets 01–06. Five node types and four edge types. `Surface` covers
 every governance object — instruction surfaces, skill packages, agent
 definitions, slash commands, hook definitions and MCP servers. `Clause` is one
 addressable fragment inside a surface, and `CONTAINS` holds the two together.
 `REFERENCES` is one pointer a surface or clause writes down, and `ExternalRef` is
 where a pointer lands when it lands outside the graph. `IDENTICAL_BYTES` is two
 files that hash the same, and `PRODUCES` is the provenance that explains a match
-when the estate wrote any down.
+when the estate wrote any down. `IndexRun` and `CoverageNote` carry no edges:
+they record what the walk covered and what it could not read, so a count read
+back out of the graph arrives with its denominator and the detector set that
+produced it.
 
 ## Run it
 
@@ -49,6 +52,12 @@ orbit/bin/orbit-context show 'CLAUDE.md#Estimating rules#M6 anchors'
 The bytes go to stdout and the locator to stderr, so redirecting stdout gives
 that span of the file and nothing else. `--repo` names a path inside the
 repository if you are not standing in it.
+
+Or read the whole repository at once, before doing anything else:
+
+```sh
+orbit/bin/orbit-context repo-map --repo /path/to/the/repository
+```
 
 Then query it with Orbit's own CLI, pointed at our file:
 
@@ -534,20 +543,141 @@ Every candidate becomes a row, including ones that could not be read. The
 | `read_error` | The filesystem refused the read. |
 | `not_a_file` | The path is not a regular file. |
 
-Three cases produce no row, and are reported in the statistics instead, so that
+Every one of these also lands in `gl_context_coverage`, keyed to the snapshot,
+so `repo-map` can report what was reached and not read without re-walking the
+tree. A reason printed once to stdout and thrown away reads afterwards as a
+surface that was never there.
+
+Three cases produce no surface row, and are reported in the statistics instead, so that
 a surface which is present but unindexed does not read as a surface that is
 absent:
 
 | Reported | Why there is no row |
 |---|---|
-| `outside_indexed_repository` | A surface under the indexed root belonging to no git repository: no branch or commit to carry. |
+| `outside_indexed_repository` | A surface under the indexed root belonging to no git repository: no branch or commit to carry. Alone among these it is not written to `gl_context_coverage` either — with no branch and no commit it keys to no snapshot. |
 | `frontmatter_declaration_absent` | A `SKILL.md` or agent file that declares no `name` and `description`. Calling it a skill would be the tool deciding. |
 | `invalid_json` | A settings or `.mcp.json` file that would not parse. Its hooks and servers are entries inside it; with the file unread there is nothing to write a row about. |
+
+## Orientation in one command
+
+`repo-map` prints one repository's governance surface: the boundary the walk
+covered, coverage, surfaces by kind, clauses and how deep they nest, edges and
+pointers by kind, the three non-resolutions, the identical-byte pairs with their
+provenance counts, and the branch's own git state. It is orientation, not a
+report — the question is "what governance does this repository carry, and how
+much of it did these detectors see", answered in one screen.
+
+**It re-walks nothing.** Every number comes out of the graph, from one
+`(project_id, branch, commit_sha)`. A second walk at map time would be a second
+answer to "what is in this repository", taken against a working tree that has
+moved on since indexing, and the map would print a denominator its own
+numerators were never measured against. So the walk records itself:
+`gl_context_run` holds one row per snapshot with the indexed root, the excluded
+directories, the files walked and the files carrying a surface kind;
+`gl_context_coverage` holds one row per file reached and not fully indexed, with
+its reason. Both are declared in ontology YAML like every other table, and
+neither carries edges — a node type is how this ontology declares a table shape,
+and the record of a walk is not a participant in the graph it produced.
+
+The consequence is that a map can be older than the tree, and that is stated
+rather than hidden: the snapshot's commit is in the header, and where the
+detector set that wrote the graph differs from the one in the running build, the
+map says so instead of presenting the counts as current.
+
+### Every zero is printed
+
+All seven surface kinds, all four clause types, all six pointer detectors, all
+three non-resolutions, all three evidence rungs — listed whether or not they
+found anything. A map printing only its non-zero rows reads as a description of
+the estate. Printed in full, a column of zeroes reads as what it is: the
+inventory of what these detectors look for, and how little of it is here.
+
+Coverage carries its denominator for the same reason. Four surfaces out of
+fifteen files and four out of 1,775 are the same numerator about two very
+different repositories.
+
+`SURFACES` reports rows and, of those, how many were read through. A candidate
+that could not be read still becomes a row carrying its reason, so the row count
+and the surface count `index` prints are two different numbers; the map
+reconciles them rather than leaving them to disagree quietly.
+
+### The budget
+
+GitLab Orbit's own `repo-map` emits **12,874 bytes (~3,200 tokens)** for a
+1,775-file repository. That measurement is the budget. The map holds to it by
+construction — every varying section is a fixed inventory of detectors, and the
+two sections that list rows are capped and say how many they did not list — and
+the last line reports what the map actually cost, counting itself. If a
+repository ever finds a way past the caps, the listings are dropped and the map
+says they were dropped rather than quietly exceeding the figure it just printed.
+
+The fixture estate maps in about 2.5 KB, and this repository in about 3 KB.
+
+### The detector set version
+
+Every count in the graph is a count of what these detectors recognise, and two
+counts taken a month apart are only comparable if the same detectors produced
+them. Ticket 04's boundary fix moved one detector's match start by one character
+and took a finding count from 1,373 to 24; read without a version beside them,
+those two numbers describe an estate that changed. It did not.
+
+So the version is **derived, not declared** — `orbit_context/detectors.py`
+digests the module-level constants and compiled patterns of the five modules
+that decide what is recognised, so editing a basename table, a pruned directory,
+a regex or an evidence rung moves it whether or not anyone remembers to. A
+constant somebody has to remember to bump is the class of mechanism this project
+has already decided it has too many of. `RECIPE` versions the digest itself, so
+`1.4e7b…` and `2.4e7b…` read as "computed differently" rather than as "detects
+differently", and `detectors.manifest()` lists every hashed input so a version
+that moved can be explained rather than merely noticed.
+
+It is recorded on each snapshot's run row and printed on every counted section,
+so a count quoted out of a map into a ticket arrives with the detector set that
+produced it.
+
+### Git state, and what absence means
+
+The map ends with the branch: its base, how many commits are ahead of it, how
+many of those carry a `Claude-Session` trailer, and how many carry this
+session's.
+
+That block exists because of a specific failure. Twice in this project a session
+read commits it had made itself, saw an unfamiliar subject line, and attributed
+them to a different session — with the disproof, a trailer carrying its own id,
+sitting in the commit body it had just printed. It then wrote that invention
+into a scheduled prompt, which fed it back as an established fact every hour.
+The rule it encodes: **absence from a transcript is a fact about the transcript,
+not about the world.**
+
+Two things about how it reads that are the whole point:
+
+- **A session identifier comes from the environment, never from the commits.**
+  Where the environment supplies none, the count is reported as *not measured* —
+  never as zero. Zero and unknown are different findings, and printing the first
+  for the second is the error the block exists to stop.
+- **Every distinct trailer is reported whatever matched.** The id a client
+  exports and the id written into the trailer are not always spelled the same
+  way — one environment exports `cse_01ABC` for a trailer reading
+  `.../session_01ABC` — so matching is on the id's tail, the variable that
+  actually matched is named, and the full distribution is printed beside it. A
+  reader who can see "seven commits carry session_01ABC" can settle the question
+  themselves when the match comes up empty.
+
+The base is resolved by a stated ladder — `--base`, then `$CLAUDE_CODE_BASE_REF`,
+then `origin/HEAD`, then the first of `origin/main`, `origin/master`, `main`,
+`master` that resolves — and the rung that answered is printed, because ahead of
+what is half the number. Where none resolves, the count is stated as not
+measured rather than guessed. The block is labelled as git state, not a detector
+finding: it is the one part of the map that is not an observation of the estate's
+governance surface.
 
 ## Statistics
 
 `index` prints JSON in Orbit's shape — `repository`, `path`, `time_seconds`,
-`graph`, `processing`, `database_path`, and `detailed` under `--stats`. `graph`
+`graph`, `coverage`, `processing`, `database_path`, `detector_set_version`, and
+`detailed` under `--stats`. `coverage` carries `files_walked`,
+`files_with_surface_kind` and `files_with_no_surface_kind`, at estate level and
+per repository. `graph`
 counts `repositories`, `surfaces`, `clauses`, `edges` and `pointers`, and reports
 `external_refs` as the three `sub_kind` counts separately, always all three, even
 at zero. `identical_bytes` is the byte-identity and provenance block above,
@@ -561,7 +691,7 @@ which the table carries that the YAML does not declare.
 ## Re-indexing
 
 Re-indexing replaces the rows for the indexed
-`(traversal_path, project_id, branch, commit_sha)` — in all four tables — rather
+`(traversal_path, project_id, branch, commit_sha)` — in all six tables — rather
 than adding a second copy. Once per *table*, not once per ontology shape: two
 edge types share `gl_context_edge`, and a second replacement for the same
 snapshot would delete what the first had just written. `project_id` is part of that key because every local row carries the same

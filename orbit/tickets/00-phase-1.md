@@ -2,7 +2,7 @@
 
 Spec: `orbit/specs/0001-observation-foundation.md`
 
-Seven tickets. Frontier is **01** alone. Work top to bottom, or take any ticket whose blockers are done.
+Seven tickets. Tickets 01–06 are done; the frontier is **07**. Work top to bottom, or take any ticket whose blockers are done.
 
 | # | Ticket | Blocked by |
 |---|---|---|

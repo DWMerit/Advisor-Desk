@@ -1,0 +1,140 @@
+# orbit/ontology/nodes/context/index_run.yaml
+#
+# Mirrors the shape of config/ontology/nodes/source_code/*.yaml from
+# gitlabhq/orbit-knowledge-graph @ 0fe19ac: a node type, its properties, and the
+# storage columns the table is built from.
+#
+# The one row per indexed snapshot that says what the walk covered. Every other
+# context table answers "what was found"; nothing in them answers "out of how
+# much, and by which detectors", and a count of twelve surfaces is unreadable
+# without both. Twelve out of fourteen files is an estate that is almost all
+# governance; twelve out of 1,775 is a detector set that recognises twelve
+# things. The rows are identical.
+#
+# So `repo-map` reads coverage and boundary from here rather than re-walking the
+# tree. A second walk at map time would be a second answer to "what is in this
+# repository", taken against a working tree that has moved on, and the map would
+# report a denominator its own numerators were never measured against.
+#
+# It carries no edges. A node type is how this ontology declares a table shape,
+# and the record of a walk is not a participant in the graph it produced.
+
+node_type: IndexRun
+domain: context
+description: One index run over one repository snapshot -- what the walk covered, and the detector set that read it
+label: detector_set_version
+default_columns: [id, path, detector_set_version, files_walked, files_with_surface_kind]
+destination_table: gl_context_run
+sort_key: [traversal_path, project_id, branch, commit_sha]
+
+style:
+  size: 10
+  color: "#64748B"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_context_run
+      key_column: id
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Git branch."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    mutable: false
+    description: "Indexed commit SHA."
+
+  path:
+    type: string
+    source: path
+    nullable: false
+    mutable: false
+    description: "Absolute path of the repository root this run covered."
+
+  indexed_root:
+    type: string
+    source: indexed_root
+    nullable: false
+    mutable: false
+    description: "Absolute path the index invocation started from. Equal to path where a repository was indexed directly, and above it where the invocation covered an estate of several repositories."
+
+  detector_set_version:
+    type: string
+    source: detector_set_version
+    nullable: false
+    mutable: false
+    description: "The version of the detector set that produced every row of this snapshot, derived from the detector inputs themselves rather than declared. Recorded per run so a count read later can be told apart from a count taken by a different detector set -- a change in the detectors and a change in the estate move the same numbers, and nothing else distinguishes them."
+    selectivity: low
+
+  excluded_directories:
+    type: string
+    source: excluded_directories
+    nullable: false
+    mutable: false
+    description: "Directory names the walk never entered, comma-separated and sorted. The boundary of the count: a surface inside one of these was not looked for, which is not the same finding as a surface that is not there."
+
+  files_walked:
+    type: int64
+    source: files_walked
+    nullable: false
+    mutable: false
+    description: "Files the walk reached in this repository, excluding nested repositories and excluded_directories. The denominator coverage is read against."
+
+  files_with_surface_kind:
+    type: int64
+    source: files_with_surface_kind
+    nullable: false
+    mutable: false
+    description: "Distinct file paths carrying at least one surface row. Distinct paths rather than rows, because a settings file holds a row per hook and would otherwise count several times against a denominator of files. Subtracted from files_walked, this is how many files these detectors recognise nothing in."
+
+storage:
+  settings:
+    index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: indexed_root, type: "String", codec: ["ZSTD(3)"]}
+    - {name: detector_set_version, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: excluded_directories, type: "String", codec: ["ZSTD(3)"]}
+    - {name: files_walked, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: files_with_surface_kind, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

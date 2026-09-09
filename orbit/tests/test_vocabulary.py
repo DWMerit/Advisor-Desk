@@ -15,7 +15,9 @@ from pathlib import Path
 from . import support  # noqa: F401
 
 from build_estate import build
-from orbit_context import clauses, pointers, provenance, settings, surfaces
+from orbit_context import (
+    clauses, detectors, pointers, provenance, repomap, settings, surfaces,
+)
 from orbit_context.indexer import index
 from orbit_context.ontology import load
 
@@ -101,6 +103,49 @@ class TestVocabulary(unittest.TestCase):
             if isinstance(value, dict):
                 for name in value:
                     self.assertEqual(offending_words(name), [], name)
+
+    def test_detector_set_version(self):
+        # Tool-authored, printed beside every count, and derived rather than
+        # chosen -- so it is linted as output and not assumed safe.
+        self.assertEqual(offending_words(detectors.VERSION), [])
+
+    def test_the_digest_guard_lists_every_word_hexadecimal_can_spell(self):
+        # detectors.FORBIDDEN_IN_A_DIGEST claims to be the subset of this list
+        # that hexadecimal can spell. Checked here rather than believed: a word
+        # added to BANNED that hex can spell would otherwise slip through the
+        # guard silently, and only show up as a version string that prints it.
+        spellable = tuple(
+            word for word in BANNED
+            if set(word) <= set("0123456789abcdef")
+        )
+        self.assertEqual(sorted(detectors.FORBIDDEN_IN_A_DIGEST), sorted(spellable))
+
+    def test_a_digest_that_spells_one_is_not_printed(self):
+        # The window slides one character at a time and stops at the first that
+        # spells nothing, so the answer is deterministic and still a function of
+        # the digest alone.
+        chosen = detectors.printable_slice("dead" + "1" * 60)
+        self.assertEqual(offending_words(chosen), [])
+        self.assertEqual(chosen, "ead111111111")
+
+    def test_repo_map_output(self):
+        """Spec 0001 §10: the vocabulary lint over every command's output.
+
+        Linted whole. The estate's own words appear in it -- paths, addresses,
+        the fqn of the deepest clause -- and those are exempt by the rule, but
+        the fixture estate does not contain any, so linting the whole text
+        checks the tool's own words without an exemption list to get wrong.
+        """
+        repositories = [
+            path for path in sorted(self.estate.iterdir())
+            if path.is_dir() and (path / ".git").exists()
+        ]
+        self.assertTrue(repositories)
+        for repository in repositories:
+            text = repomap.repo_map(
+                repository, db_path=self.tmp / "graph.duckdb", environ={},
+            )
+            self.assertEqual(offending_words(text), [], repository.name)
 
     def test_column_names(self):
         # Nodes and edges alike: every column name is the tool's own word.

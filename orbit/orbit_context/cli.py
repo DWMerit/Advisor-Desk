@@ -1,9 +1,13 @@
 """``orbit-context`` — the context-domain indexer for Orbit's local graph.
 
-Two commands. ``index`` writes the graph; ``show`` reads one clause back out of
-the file it came from, at the byte offsets the graph recorded. ``show`` writes
-the clause's bytes to stdout and nothing else, so what comes out is the span of
-the file and can be compared to it byte for byte; the locator goes to stderr.
+Three commands. ``index`` writes the graph; ``show`` reads one clause back out
+of the file it came from, at the byte offsets the graph recorded; ``repo-map``
+prints one repository's governance surface, read from the graph, inside a stated
+budget.
+
+``show`` writes the clause's bytes to stdout and nothing else, so what comes out
+is the span of the file and can be compared to it byte for byte; the locator
+goes to stderr.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ import argparse
 import json
 import sys
 
-from . import retrieve, store
+from . import history, repomap, retrieve, store
 from .indexer import index
 from .ontology import OntologyError
 from .store import StoreError
@@ -63,6 +67,38 @@ def build_parser() -> argparse.ArgumentParser:
              "without this a heading returns its whole subtree.",
     )
     show_parser.add_argument(
+        "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
+        help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
+    )
+
+    map_parser = subparsers.add_parser(
+        "repo-map",
+        help="Print one repository's governance surface, inside a stated budget",
+    )
+    map_parser.add_argument(
+        "--repo", dest="repo", default=".",
+        help="A path inside the repository to map (default: the working "
+             "directory). Its git state selects the indexed snapshot.",
+    )
+    map_parser.add_argument(
+        "--base", dest="base", default=None,
+        help="The ref commits ahead are counted against. Default: "
+             f"${history.BASE_VARIABLE}, then origin/HEAD, then the first of "
+             + ", ".join(history.BASE_CANDIDATES) + " that resolves.",
+    )
+    map_parser.add_argument(
+        "--session", dest="session", default=None,
+        help="This session's id, for counting which commits ahead carry its "
+             f"{history.TRAILER_KEY} trailer. Default: read from "
+             + " or ".join(history.SESSION_VARIABLES) + ". Where none is "
+             "available the count is reported as not measured, never as zero.",
+    )
+    map_parser.add_argument(
+        "--budget", dest="budget", type=int, default=repomap.BUDGET_BYTES,
+        help=f"Byte budget for the output (default: {repomap.BUDGET_BYTES}, "
+             f"{repomap.BUDGET_CITATION}).",
+    )
+    map_parser.add_argument(
         "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
         help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
     )
@@ -126,6 +162,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"orbit-context: {clause.locator}", file=sys.stderr)
         sys.stdout.buffer.write(body)
         sys.stdout.buffer.flush()
+        return 0
+
+    if args.command == "repo-map":
+        try:
+            print(repomap.repo_map(
+                args.repo, db_path=args.db_path, base=args.base,
+                session=args.session, budget=args.budget,
+            ), end="")
+        except (repomap.RepoMapError, StoreError, GitError,
+                retrieve.RetrievalError) as error:
+            print(f"orbit-context: {error}", file=sys.stderr)
+            return 1
         return 0
     return 1
 
