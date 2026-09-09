@@ -11,30 +11,51 @@ Run an Orbit-shaped context graph over the HITL estate, covering the half of the
 
 ## 2. The architecture decision, settled by test
 
-Three routes were possible. A fourth was found and verified.
+Their ontology is embedded at build time (`rust-embed`). An overlay merge exists — `Ontology::load_embedded_with_overlay`, maps merge, lists append, overlay-only files are added — but it is called **only from their integration test kit**. No CLI flag or env var reaches it. So extending their ontology in the installed binary needs a source build.
 
-Their ontology is embedded at build time (`rust-embed`). An overlay merge exists — `Ontology::load_embedded_with_overlay`, maps merge, lists append, overlay-only files are added — but it is called **only from their integration test kit**. No CLI flag or env var reaches it. So extending their ontology in the installed binary is not possible; it needs a source build.
+But the local graph is a plain DuckDB file, and a separate process can work with it. Two ways to do that were tested; the second is chosen.
 
-**But the local graph is a plain DuckDB file at `~/.orbit/graph.duckdb`, and nothing stops another process writing tables into it.**
+### Rejected: co-resident tables in their file
 
-Verified, working, this session:
+Writing `gl_context_*` directly into `~/.orbit/graph.duckdb`. It works, and it survives their re-index — a full `orbit index` over 1,775 files left the context rows intact and still joinable. It was the first choice.
 
-```sql
-orbit sql "SELECT c.path, c.client, c.activation, c.size_bytes, f.language
-           FROM gl_context_surface c JOIN gl_file f ON f.path = c.path
-           ORDER BY c.size_bytes DESC"
+**It was rejected on a measured constraint: DuckDB's file lock is exclusive across processes.** While one process holds the file for writing, no other process can open it *at all* — not even read-only:
+
+```
+Error: Could not set lock on file "/root/.orbit/graph.duckdb":
+Conflicting lock is held in /usr/bin/python3.11 (PID 1779)
 ```
 
-A context domain written by a separate indexer is queried by **their** CLI and **joins to their code graph**. That is the emulation path:
+That is their CLI locked out by our indexer. Multiple readers coexist; one writer shuts the door on everyone. In practice: an agent holding an `orbit mcp` session blocks indexing, and indexing blocks every `orbit sql`. Daily friction, and it also puts our data inside a file whose lifecycle, schema versioning (`_orbit_manifest`, `_orbit_meta`) and uninstall we do not control.
+
+### Chosen: our own file, theirs attached read-only
+
+`~/.orbit-context/context.duckdb`, with `ATTACH '<their file>' AS orbit (READ_ONLY)` whenever a cross-domain join is wanted.
+
+Verified working:
+
+```sql
+SELECT c.path, c.surface_kind, f.size_bytes, f.language
+FROM gl_context_surface c
+JOIN orbit.gl_file f ON f.path = c.path
+```
+
+And verified that the coupling is gone: their CLI answered normally (1,977 rows) **while** a write lock was held on our file.
 
 | Route | Cost | Chosen |
 |---|---|---|
 | Fork and build from source | Rust toolchain, upstream tracking, indexer work in Rust | No |
 | Contribute the domain upstream | Longest path, not ours to schedule | Later, maybe (§12) |
-| Parallel tool, own store | Loses their query surface, MCP, and all joins | No |
-| **Co-resident tables in their DuckDB** | **A Python indexer that writes `gl_context_*`** | **Yes** |
+| Co-resident tables in their DuckDB | Exclusive-lock coupling; our data inside a file they own | No — rejected on test |
+| **Own file, theirs attached read-only** | **Cross-domain joins only from our tool** | **Yes** |
 
-Consequence: **`orbit sql` is the query engine, `orbit mcp` is the agent surface, and neither has to be built.**
+### What this costs, stated plainly
+
+The attach does **not** persist for a fresh connection — verified: `orbit local sql --db <our file>` reads our tables fine, but `orbit.gl_file` is then not in the catalog. So a single query spanning both graphs runs only from our tool, the one that does the ATTACH. Their CLI reads one file or the other.
+
+That is judged cheap: phase 1 is entirely governance-side, and the cross-graph join is a proof rather than a daily need. The lock coupling was the daily one.
+
+**Retained:** `orbit local sql --db ~/.orbit-context/context.duckdb` works against our file, so their query surface still serves our tables. **Given up:** `orbit mcp` serving both domains as one graph.
 
 ## 3. Emulated wholesale
 
@@ -42,7 +63,7 @@ Adopted without argument. These are their calls.
 
 | Adopted | Detail |
 |---|---|
-| **Persistent DuckDB** | `~/.orbit/graph.duckdb`, the same file. No live-derivation scheme, no cache of our own. Earlier revisions cut persistence on one small measurement; that is withdrawn. |
+| **Persistent DuckDB** | Their storage engine and file format, in our own file at `~/.orbit-context/context.duckdb` (§2). No live-derivation scheme, no cache of our own. Earlier revisions cut persistence on one small measurement; that is withdrawn. |
 | **`gl_` table naming and column conventions** | `id`, `traversal_path`, `project_id`, `branch`, `commit_sha`, `path`, `name`, `size_bytes`, `reason`. |
 | **`branch` + `commit_sha` on every row** | Snapshot semantics. Multiple repositories and branches coexist, scoped by `traversal_path`. |
 | **`reason` column for skipped/errored files** | Coverage is a property of the record, not a footnote. |
@@ -161,7 +182,9 @@ These cost nothing and are not gated:
 7. Hash every file; emit `IDENTICAL_BYTES`.
 8. Emit JSON statistics, including skipped and errored counts with reasons.
 
-Writes only `gl_context_*` tables. **Never writes to their tables.** Re-index replaces rows for the indexed `(traversal_path, branch, commit_sha)`.
+Writes only to our own file. **Never opens their file for writing** — read-only ATTACH, and only when a join is needed. Re-index replaces rows for the indexed `(traversal_path, branch, commit_sha)`.
+
+Holding a write lock on our file does not block `orbit index`, `orbit sql` or `orbit mcp`. That independence is the point of §2 and should be re-tested if the storage decision is ever revisited.
 
 Reads the checked-out tree. Other branches are reachable via `git cat-file` without checkout — deferred to a later slice, and recorded as a coverage gap until then, not as absence.
 
@@ -254,7 +277,7 @@ No ledger. No evidence columns. A faithful small Orbit whose domain happens to b
 3. **Which clients count.** The set changes every number in §9.
 4. **Whether to adopt Orbit Local for the code half**, given its persistent index and its telemetry to a GitLab-operated collector.
 5. **§8 footprint.** The self-accounting resolution is proposed, not settled.
-6. **Whether the context domain is eventually contributed upstream** as a GitLab ontology domain rather than maintained co-resident. Their README explicitly invites ontology contributions.
+6. **Whether the context domain is eventually contributed upstream** as a GitLab ontology domain rather than maintained as a separate file. If it were, the lock constraint in §2 stops mattering — one binary, one writer. Their README explicitly invites ontology contributions.
 7. **What "one real estimating task" means** for the cold-start count.
 8. **Whether a rule removed to lower that number was doing work.** The tool measures the number; it cannot measure the loss.
 9. **Whether this is built at all.** §13 stands.

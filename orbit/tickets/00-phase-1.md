@@ -24,18 +24,21 @@ A faithful small **Orbit over the estate's governance surface** — the half Git
 
 ## Architecture, already verified
 
-Context tables live **inside GitLab Orbit's own DuckDB** at `~/.orbit/graph.duckdb`. A separate Python indexer writes `gl_context_*`; their CLI queries it and joins it to their code graph:
+Context tables live in **our own DuckDB file** at `~/.orbit-context/context.duckdb`. GitLab Orbit's graph is attached **read-only** when a cross-domain join is wanted:
 
 ```
-orbit sql "SELECT c.path, c.surface_kind, f.language
-           FROM gl_context_surface c JOIN gl_file f ON f.path = c.path"
+ATTACH '~/.orbit/graph.duckdb' AS orbit (READ_ONLY);
+SELECT c.path, c.surface_kind, f.language
+FROM gl_context_surface c JOIN orbit.gl_file f ON f.path = c.path
 ```
 
-`orbit sql` is the query engine, `orbit mcp` is the agent surface. Neither gets built.
+**Why a separate file, not theirs.** DuckDB's file lock is exclusive across processes: while one process holds a file for writing, no other process can open it at all — not even read-only. Writing into their file means our indexer locks out `orbit sql` and `orbit mcp`, and an open MCP session locks out our indexer. Tested and confirmed. With a separate file, their CLI kept answering while we held our own write lock.
+
+`orbit local sql --db ~/.orbit-context/context.duckdb` still works against our file, so their query surface serves our tables.
 
 ## Rules for every ticket
 
-- **Never write to their tables.** Only `gl_context_*`.
+- **Never open their file for writing.** Read-only ATTACH only, and only when joining.
 - Their column conventions: `id`, `traversal_path`, `project_id`, `branch`, `commit_sha`, `path`, `name`, `size_bytes`, `reason`.
 - **No prose columns.** No `summary`, no `purpose`. Rows carry paths and offsets; callers read bytes.
 - **Vocabulary constraint** on tool-authored fields: never *broken, dangling, orphaned, obsolete, stale, dead, unused, duplicate, redundant, misplaced, wrong, should, safe to delete*. Paths and quotes are exempt — they carry the estate's own words.
