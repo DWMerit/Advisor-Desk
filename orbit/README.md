@@ -17,12 +17,14 @@ attaches. Orbit's CLI reads one file or the other.
 
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
 
-Phase 1, tickets 01–04. Three node types and two edge types. `Surface` covers
+Phase 1, tickets 01–05. Three node types and four edge types. `Surface` covers
 every governance object — instruction surfaces, skill packages, agent
 definitions, slash commands, hook definitions and MCP servers. `Clause` is one
 addressable fragment inside a surface, and `CONTAINS` holds the two together.
 `REFERENCES` is one pointer a surface or clause writes down, and `ExternalRef` is
-where a pointer lands when it lands outside the graph.
+where a pointer lands when it lands outside the graph. `IDENTICAL_BYTES` is two
+files that hash the same, and `PRODUCES` is the provenance that explains a match
+when the estate wrote any down.
 
 ## Run it
 
@@ -105,6 +107,38 @@ orbit local sql "SELECT x.address, count(*) AS mentions,
                  WHERE x.sub_kind = 'no-indexed-target-match'
                  GROUP BY 1 ORDER BY 2 DESC"
 
+# Byte-identical pairs, each with whatever provenance either end carries.
+# The two are read together on purpose: the pair count alone over-reads.
+orbit local sql "SELECT i.source_path, i.target_path, p.subtype AS evidence,
+                        p.source_path AS producer,
+                        p.evidence_path || ':' || p.evidence_line AS evidenced_at
+                 FROM gl_context_edge i
+                 LEFT JOIN gl_context_edge p
+                   ON p.relationship_kind = 'PRODUCES'
+                  AND p.project_id = i.project_id
+                  AND p.target_path IN (i.source_path, i.target_path)
+                 WHERE i.relationship_kind = 'IDENTICAL_BYTES'
+                 ORDER BY i.source_path"
+
+# How many identical-byte pairs carry any provenance evidence at all.
+orbit local sql "SELECT count(*) AS pairs,
+                        count(*) FILTER (WHERE producer IS NOT NULL) AS with_provenance
+                 FROM (SELECT i.source_path, max(p.source_path) AS producer
+                       FROM gl_context_edge i
+                       LEFT JOIN gl_context_edge p
+                         ON p.relationship_kind = 'PRODUCES'
+                        AND p.project_id = i.project_id
+                        AND p.target_path IN (i.source_path, i.target_path)
+                       WHERE i.relationship_kind = 'IDENTICAL_BYTES'
+                       GROUP BY i.source_path, i.target_path)"
+
+# Every producer the estate names, on the rung of evidence it stands on.
+orbit local sql "SELECT subtype AS evidence, source_path AS producer,
+                        target_path AS artifact, source_address AS named_as,
+                        evidence_path || ':' || evidence_line AS evidenced_at
+                 FROM gl_context_edge
+                 WHERE relationship_kind = 'PRODUCES' ORDER BY subtype, artifact"
+
 # What the estate declares superseded, beside the surface that still loads.
 orbit local sql "SELECT e.source_path || ':' || e.source_line AS claimed_at,
                         e.target_address, s.surface_kind, s.size_bytes
@@ -152,7 +186,7 @@ alone will match a same-named file in a different repository. Join on
 
 ## The table comes from the YAML
 
-Five files, in GitLab's own tree shape, each copied from the shape of one of
+Seven files, in GitLab's own tree shape, each copied from the shape of one of
 theirs, so any of them can be overlaid onto their ontology tree or contributed
 upstream unchanged:
 
@@ -163,13 +197,17 @@ upstream unchanged:
 | `ontology/nodes/context/external_ref.yaml` | their node format | `gl_context_external_ref` |
 | `ontology/edges/context/contains.yaml` | their edge format, with `variants` | `gl_context_edge` |
 | `ontology/edges/context/references.yaml` | their edge format, with `variants` | `gl_context_edge` |
+| `ontology/edges/context/identical_bytes.yaml` | their edge format, with `variants` | `gl_context_edge` |
+| `ontology/edges/context/produces.yaml` | their edge format, with `variants` | `gl_context_edge` |
 
-Two edge types share `gl_context_edge`, which is what an edge table is for, and
-they do not carry the same columns: `CONTAINS` holds only the endpoints, while
-`REFERENCES` also holds a detector, a locator and an address. The table is the
-**union** of both files' columns, and a column two files declare differently
-fails the index rather than one of them silently winning. The columns one edge
-type does not carry are NULL on its rows.
+Four edge types share `gl_context_edge`, which is what an edge table is for, and
+they do not carry the same columns: `CONTAINS` holds only the endpoints,
+`REFERENCES` also holds a detector, a locator and an address, `IDENTICAL_BYTES`
+holds the digest two files share, and `PRODUCES` holds a rung of evidence and
+the locator of the line that evidences it. The table is the **union** of all
+four files' columns, and a column two files declare differently fails the index
+rather than one of them silently winning. The columns one edge type does not
+carry are NULL on its rows.
 
 The indexer builds each DuckDB table from that file's `storage.columns`. Adding a
 column to the YAML adds it to the table on the next index; no Python change.
@@ -401,6 +439,88 @@ resolved, 52 distinct `no-indexed-target-match` addresses**, and every one of th
 in the thousands, the detector is wrong, not the estate — which is what
 `orbit/tests/test_pointers.py` asserts, over this repository, on every run.
 
+## Identical bytes, never counted on their own
+
+Every file in a repository is hashed — not only the surfaces — and each pair of
+files whose bytes hash the same becomes one `IDENTICAL_BYTES` row carrying both
+paths and the digest they share. Pure observation. Nothing in the row says why
+they match, and spec §14 keeps *whether two identical files are intentionally
+identical* as a permanent UNKNOWN.
+
+**The count is never emitted alone.** A bare hash-match count over-reads badly,
+so it is reported in one block with the count of pairs carrying provenance
+evidence and the count carrying none:
+
+```json
+"identical_bytes": {
+  "pairs": 28,
+  "pairs_with_provenance": 0,
+  "pairs_without_provenance": 28,
+  "produces_edges": 0,
+  "produces_by_evidence": {"artifact-header": 0, "manifest-declaration": 0,
+                           "literal-write-path": 0},
+  "generation_declared_without_producer_named": 0,
+  "producer_named_no_indexed_target_match": 0,
+  "files_hashed": 231,
+  "files_not_read": 0,
+  "zero_byte_files_not_paired": 1
+}
+```
+
+That is this repository, and it is the ticket's own measurement: **28 pairs, 0
+producers**. Every pair is a workbench file matching a published file — one
+pipeline run 28 times — and the provenance explaining all 28 is invisible to the
+tool, because nothing in the tree writes it down. The block is built in one
+function (`provenance.summary`), which is what makes "never alone" a property of
+the code rather than a habit.
+
+Two files are only ever paired **within one repository**: two repositories are
+two snapshots with their own branch and commit, and an edge across them would
+join two things this indexer has not established are the same.
+
+Zero-byte files are counted and left out of the pairing. An empty file matches
+every other empty file, so twenty of them would report 190 pairs that say
+nothing about any of them.
+
+### `PRODUCES` is a ladder, strongest first
+
+| `subtype` | Evidence | Where the locator points |
+|---|---|---|
+| `artifact-header` | The artifact's own header names its producer — `Generated by X`, `@generated`, `DO NOT EDIT` | the artifact |
+| `manifest-declaration` | A config or manifest declares input → output, both resolving in the tree | the manifest |
+| `literal-write-path` | A script contains a literal path it writes to | the script |
+
+One artifact keeps only its **strongest** rung. A file whose header names the
+script that also writes it by literal path is one fact evidenced twice, not two
+producers.
+
+`evidence_path` and `evidence_line` are their own columns because the evidence
+is not always at either end of the edge: a header sits in the artifact, a
+manifest declaration in a third file. `source_address` holds the producer
+exactly as the estate wrote it, beside the `source_path` it resolved to.
+
+Three near-misses are counted rather than turned into edges, because each says
+something different:
+
+- **A producer named that the tree does not hold** — an edge needs both ends, so
+  none is written, and `producer_named_no_indexed_target_match` records that a
+  producer *was* named.
+- **A file that says it was generated without saying by what** —
+  `generation_declared_without_producer_named`. Evidence of something; not
+  evidence of what.
+- **A header written in prose** — not evidence at all. A generation header is
+  read only from a comment or the leading frontmatter block. Without that rule
+  the detector reads the sentence in `orbit/tickets/05` warning about trailing
+  comment syntax as a header, and reports the ticket as an artifact of the
+  script that sentence names. That is the tool talking about itself, which this
+  project has already paid for once at 1,349 findings out of 1,373, and
+  `orbit/tests/test_provenance.py` pins it using the ticket's own text.
+
+Producer parsing takes only the **first token** after `by`, then trims the
+comment's own closing syntax off it: `Generated by scripts/build.py -- DO NOT
+EDIT -->` names `scripts/build.py`. Without the trim the name resolves to
+nothing and a producer the estate did name is reported as one it did not.
+
 ## Coverage is a record, not a footnote
 
 Every candidate becomes a row, including ones that could not be read. The
@@ -430,7 +550,9 @@ absent:
 `graph`, `processing`, `database_path`, and `detailed` under `--stats`. `graph`
 counts `repositories`, `surfaces`, `clauses`, `edges` and `pointers`, and reports
 `external_refs` as the three `sub_kind` counts separately, always all three, even
-at zero. Skipped entries carry
+at zero. `identical_bytes` is the byte-identity and provenance block above,
+present at estate level and per repository, with every key including each rung
+of the ladder reported even at zero. Skipped entries carry
 `reason`, errored entries carry `kind`, matching their `SkippedFile` and
 `ErroredFile`. A `repositories` array itemises each repository found under the
 indexed root, and `schema` reports, per table, which columns the YAML added and

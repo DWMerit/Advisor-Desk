@@ -16,11 +16,48 @@ Take only the **first token** of a parsed producer name. Header comments carry t
 
 ## Acceptance
 
-- [ ] Identical-byte count is **never emitted alone** — always with the count of those pairs carrying provenance evidence
-- [ ] A pair where both files carry a generation header links to the producer
-- [ ] A pair with no provenance is reported as exactly that, with no inference about why
-- [ ] Producer parsing does not capture trailing comment syntax
-- [ ] Output contains no forbidden vocabulary word
+- [x] Identical-byte count is **never emitted alone** — always with the count of those pairs carrying provenance evidence
+- [x] A pair where both files carry a generation header links to the producer
+- [x] A pair with no provenance is reported as exactly that, with no inference about why
+- [x] Producer parsing does not capture trailing comment syntax
+- [x] Output contains no forbidden vocabulary word
+
+Pinned by test in `orbit/tests/test_provenance.py`, with the vocabulary lint
+extended to the three evidence rungs and both edge names in
+`orbit/tests/test_vocabulary.py`.
+
+**The measurement, re-run.** Over this repository: **28 identical-byte pairs, 0
+`PRODUCES` edges**, from 231 files hashed. The same 28 the ticket was written
+from, and the same zero — every pair a workbench file matching a published file,
+and nothing in the tree writing its provenance down anywhere a detector can read
+it. The pairing being mandatory is what stops that reading as 28 findings.
+
+**How "never alone" is enforced.** Both counts come out of one function
+(`provenance.summary`) as one dict, at estate level and per repository, with
+every key present at zero. A caller cannot emit the pair count and forget the
+provenance count, because there is no call that returns only the first. The test
+walks the whole statistics document and fails on any dict carrying `pairs`
+without its companions.
+
+**Four decisions the ticket did not force:**
+
+- *A generation header is read only from a comment or the leading frontmatter
+  block.* The first run of the detector read this ticket's own sentence about
+  trailing comment syntax and reported the ticket as an artifact of
+  `scripts/build.py`. Prose about generation is not generation. The regression
+  test reads this file rather than a copy of the sentence.
+- *Zero-byte files are counted and left out of the pairing.* An empty file
+  matches every other empty file; twenty of them would report 190 pairs that
+  say nothing about any of them. Counted under a key of their own, never
+  silently dropped.
+- *A pair is only ever written within one repository.* Two repositories are two
+  snapshots with their own branch and commit, so an edge across them would join
+  two things this indexer has not established are the same. The fixture writes
+  the same bytes into two repositories to hold that line.
+- *A producer named that the tree does not hold writes no edge, and is counted.*
+  An edge needs both ends. So is a file that says it was generated without
+  saying by what — evidence of something, not evidence of what, and neither an
+  edge nor nothing.
 
 ## Watch for
 

@@ -99,11 +99,11 @@ class TestAddingAColumn(unittest.TestCase):
 
 
 class TestASharedEdgeTable(unittest.TestCase):
-    """Two edge types, one table. The table has to be the union of both files.
+    """Four edge types, one table. The table has to be the union of them all.
 
-    Taking the first declaring file and stopping would leave the second's
+    Taking the first declaring file and stopping would leave the others'
     columns uncreated, and every write of them would fail -- on whichever file
-    happened to load second, which is a filename ordering deciding a schema.
+    happened to load first, which is a filename ordering deciding a schema.
     """
 
     def setUp(self):
@@ -117,13 +117,17 @@ class TestASharedEdgeTable(unittest.TestCase):
         shape, = [s for s in load(root).tables if s.table == "gl_context_edge"]
         return shape
 
-    def test_both_files_reach_the_table(self):
+    def test_every_file_reaches_the_table(self):
         columns = self.table(self.ontology).column_names
-        # Declared by both.
+        # Declared by all four.
         self.assertIn("source_id", columns)
-        # Declared only by references.yaml.
-        for name in ("subtype", "source_path", "source_line", "target_address",
-                     "in_code_fence"):
+        # Declared by more than one, but not by contains.yaml.
+        for name in ("subtype", "source_path", "target_path"):
+            self.assertIn(name, columns)
+        # Declared by one file each: references, identical_bytes, produces.
+        for name in ("source_line", "target_address", "in_code_fence",
+                     "content_sha256", "source_address", "evidence_path",
+                     "evidence_line"):
             self.assertIn(name, columns)
 
     def test_a_column_declared_twice_appears_once(self):
@@ -140,22 +144,29 @@ class TestASharedEdgeTable(unittest.TestCase):
         with self.assertRaises(OntologyError):
             self.table(self.ontology)
 
-    def test_a_table_built_before_the_second_file_gains_its_columns(self):
-        # The migration a live graph takes: the table exists from CONTAINS
-        # alone, and adding references.yaml has to reach it by ALTER.
+    def test_a_table_built_before_a_later_file_gains_its_columns(self):
+        # The migration a live graph takes: the table exists without
+        # references.yaml, and adding it has to reach the table by ALTER.
+        # Checked on a column only references.yaml declares, so a sibling edge
+        # file declaring the same name cannot make the assertion pass for the
+        # wrong reason.
         held = self.references.read_text(encoding="utf-8")
         self.references.unlink()
         db = self.tmp / "graph.duckdb"
         connection = store.connect(db)
         store.reconcile(connection, self.table(self.ontology))
-        self.assertNotIn("subtype", store.existing_columns(connection, "gl_context_edge"))
+        self.assertNotIn(
+            "in_code_fence", store.existing_columns(connection, "gl_context_edge")
+        )
         connection.close()
 
         self.references.write_text(held, encoding="utf-8")
         connection = store.connect(db)
         outcome = store.reconcile(connection, self.table(self.ontology))
-        self.assertIn("subtype", outcome["columns_added"])
-        self.assertIn("subtype", store.existing_columns(connection, "gl_context_edge"))
+        self.assertIn("in_code_fence", outcome["columns_added"])
+        self.assertIn(
+            "in_code_fence", store.existing_columns(connection, "gl_context_edge")
+        )
         connection.close()
 
 

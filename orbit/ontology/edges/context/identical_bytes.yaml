@@ -1,0 +1,135 @@
+# orbit/ontology/edges/context/identical_bytes.yaml
+#
+# One edge type, in GitLab's edge format, routed to the same gl_context_edge
+# table as CONTAINS, REFERENCES and PRODUCES.
+#
+# Pure observation: two files hash to the same sha256. Nothing here says why,
+# and nothing here says whether that is intended -- spec 0001 §14 lists
+# "whether two identical files are intentionally identical" as a permanent
+# UNKNOWN. The word for the finding is the measurement that produced it.
+#
+# File is Orbit's own gl_file, in their database, not a row this indexer
+# writes. The id is a deterministic handle over the snapshot and the path, and
+# the join that crosses graphs goes by source_path and target_path.
+#
+# Byte-identity on its own over-reads. A count of matching pairs is never
+# emitted without the count of those pairs carrying provenance evidence, which
+# is what the PRODUCES edges beside these rows hold.
+
+edge_type: IDENTICAL_BYTES
+domain: context
+description: Two files in one repository hash to the same sha256 -- an observation about the bytes, and nothing more
+destination_table: gl_context_edge
+
+variants:
+  - from_node: File
+    to_node: File
+    description: Two files whose contents hash the same. The relation is symmetric, so one row is written per unordered pair, with the lexicographically first path as the source -- two rows would be one fact counted twice.
+
+properties:
+  source_id:
+    type: int64
+    source: source_id
+    nullable: false
+    mutable: false
+    description: "id of the row the edge leaves -- a deterministic handle over the snapshot and the path, because the file's own row lives in Orbit's gl_file."
+
+  source_kind:
+    type: string
+    source: source_kind
+    nullable: false
+    mutable: false
+    description: "Node type of the source row. File here."
+    selectivity: low
+
+  relationship_kind:
+    type: string
+    source: relationship_kind
+    nullable: false
+    mutable: false
+    description: "The edge type. IDENTICAL_BYTES here."
+    selectivity: low
+
+  target_id:
+    type: int64
+    source: target_id
+    nullable: false
+    mutable: false
+    description: "id of the row the edge enters, on the same handle convention as source_id."
+
+  target_kind:
+    type: string
+    source: target_kind
+    nullable: false
+    mutable: false
+    description: "Node type of the row the edge enters. File here."
+    selectivity: low
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID. A pair is only ever written within one repository: two repositories are two snapshots, with their own branch and commit, and an edge across them would join two things this indexer has not established are the same."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Git branch."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    mutable: false
+    description: "Indexed commit SHA."
+
+  source_path:
+    type: string
+    source: source_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path of the first file of the pair, lexicographically. NULL on edge types that carry no path."
+
+  target_path:
+    type: string
+    source: target_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path of the second file of the pair. NULL on edge types that carry no path."
+
+  content_sha256:
+    type: string
+    source: content_sha256
+    nullable: true
+    mutable: false
+    description: "The sha256 both files hash to, in hex. It is the whole evidence for this edge, so it is carried on the row rather than recomputed. NULL on edge types that are not derived from a hash."
+
+storage:
+  settings:
+    index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: source_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: source_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: source_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: target_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: content_sha256, type: "String", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_content_sha256, column: content_sha256, type: "bloom_filter(0.0001)", granularity: 1}

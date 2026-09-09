@@ -126,6 +126,14 @@ def classify(relative_path: str) -> str | None:
 
 
 @dataclass(frozen=True)
+class WalkedFile:
+    """One file the walk reached. Not every file is a candidate."""
+
+    relative_path: str
+    absolute_path: Path
+
+
+@dataclass(frozen=True)
 class Candidate:
     """A path whose name or location says it is worth reading."""
 
@@ -246,13 +254,18 @@ def split_frontmatter(text: str) -> Frontmatter:
     )
 
 
-def walk_repo(repo_root: Path, nested_repos: list[Path] | None = None) -> list[Candidate]:
-    """Every candidate in one repository, in sorted path order.
+def walk_files(repo_root: Path, nested_repos: list[Path] | None = None) -> list[WalkedFile]:
+    """Every file in one repository, in sorted path order.
+
+    The walk is shared: a surface is one of these files that also carries a
+    name or a location this indexer recognises, and everything else is still a
+    file that can be hashed. Two walks would be two answers to "what is in this
+    repository", and the pruning rules would have to agree by hand.
 
     Files belonging to a nested repository are left to that repository.
     """
     nested = {p.resolve() for p in (nested_repos or [])}
-    candidates: list[Candidate] = []
+    found: list[WalkedFile] = []
     stack = [repo_root]
     while stack:
         current = stack.pop()
@@ -270,11 +283,22 @@ def walk_repo(repo_root: Path, nested_repos: list[Path] | None = None) -> list[C
                     continue
                 stack.append(entry)
                 continue
-            relative = entry.relative_to(repo_root).as_posix()
-            kind = classify(relative)
-            if kind is not None:
-                candidates.append(Candidate(relative, entry, kind))
-    return sorted(candidates, key=lambda c: c.relative_path)
+            found.append(WalkedFile(entry.relative_to(repo_root).as_posix(), entry))
+    return sorted(found, key=lambda walked: walked.relative_path)
+
+
+def candidates(walked_files: list[WalkedFile]) -> list[Candidate]:
+    """The walked files whose name or location says they are worth reading."""
+    return [
+        Candidate(walked.relative_path, walked.absolute_path, kind)
+        for walked in walked_files
+        if (kind := classify(walked.relative_path)) is not None
+    ]
+
+
+def walk_repo(repo_root: Path, nested_repos: list[Path] | None = None) -> list[Candidate]:
+    """Every candidate in one repository, in sorted path order."""
+    return candidates(walk_files(repo_root, nested_repos))
 
 
 def read_candidate(candidate: Candidate) -> Reading:

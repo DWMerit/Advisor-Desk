@@ -15,7 +15,7 @@ from pathlib import Path
 from . import support  # noqa: F401
 
 from build_estate import build
-from orbit_context import clauses, pointers, settings, surfaces
+from orbit_context import clauses, pointers, provenance, settings, surfaces
 from orbit_context.indexer import index
 from orbit_context.ontology import load
 
@@ -79,6 +79,28 @@ class TestVocabulary(unittest.TestCase):
         # see, and none of them names a defect.
         for sub_kind in pointers.SUB_KINDS:
             self.assertEqual(offending_words(sub_kind), [], sub_kind)
+
+    def test_evidence_rung_names(self):
+        # The ladder PRODUCES stands on. Each names how well a claim is
+        # evidenced, and none of them names a defect.
+        for rung in provenance.EVIDENCE_LADDER:
+            self.assertEqual(offending_words(rung), [], rung)
+
+    def test_identical_bytes_is_the_measurement_not_a_judgement(self):
+        # The word for byte-identity is the measurement that produced it. Two
+        # files being the same bytes is an observation; what it means about
+        # either of them is not in this graph, and spec 0001 §14 keeps it out.
+        for name in (provenance.IDENTICAL_BYTES_EDGE, provenance.PRODUCES_EDGE):
+            self.assertEqual(offending_words(name), [], name)
+
+    def test_provenance_statistics_keys(self):
+        # Built from an empty scan, so every key the block can carry is linted
+        # whether or not this estate happens to produce it.
+        for key, value in provenance.summary(provenance.Scan(), [], []).items():
+            self.assertEqual(offending_words(key), [], key)
+            if isinstance(value, dict):
+                for name in value:
+                    self.assertEqual(offending_words(name), [], name)
 
     def test_column_names(self):
         # Nodes and edges alike: every column name is the tool's own word.

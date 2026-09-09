@@ -205,7 +205,7 @@ def _fenced_lines(lines: list[str]) -> set[int]:
     return inside
 
 
-def _frontmatter_lines(lines: list[str]) -> range:
+def frontmatter_lines(lines: list[str]) -> range:
     """The line indices between the leading ``---`` fences, if there are any."""
     if not lines or lines[0].strip() != FRONTMATTER_FENCE:
         return range(0)
@@ -305,7 +305,7 @@ def extract(text: str) -> list[Pointer]:
         return []
     line_offsets = _line_byte_offsets(lines)
     fenced = _fenced_lines(lines)
-    frontmatter = _frontmatter_lines(lines)
+    frontmatter = frontmatter_lines(lines)
 
     found = []
     for hit in _detect(lines, frontmatter):

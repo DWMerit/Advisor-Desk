@@ -11,6 +11,7 @@ from pathlib import Path
 from . import clauses as clause_module
 from . import ontology as ontology_module
 from . import pointers as pointer_module
+from . import provenance as provenance_module
 from . import store, surfaces
 from .ontology import EdgeType, NodeType, OntologyError
 from .workspace import (
@@ -28,6 +29,8 @@ CLAUSE_NODE = "Clause"
 EXTERNAL_REF_NODE = "ExternalRef"
 CONTAINS_EDGE = "CONTAINS"
 REFERENCES_EDGE = "REFERENCES"
+IDENTICAL_BYTES_EDGE = provenance_module.IDENTICAL_BYTES_EDGE
+PRODUCES_EDGE = provenance_module.PRODUCES_EDGE
 
 # Orbit's own node type. A pointer landing on a file that is not a governance
 # surface points at a row in their `gl_file`, in their database -- so the edge
@@ -50,6 +53,9 @@ class RepoResult:
     # different statements about the detector set, and one total says none of
     # them.
     external_refs: dict = field(default_factory=dict)
+    # The byte-identity count and the provenance counts, in one dict, because
+    # the first over-reads without the second. See provenance.summary.
+    identical_bytes: dict = field(default_factory=dict)
     skipped: list[dict] = field(default_factory=list)
     errored: list[dict] = field(default_factory=list)
 
@@ -74,6 +80,16 @@ def _digest(path) -> str:
         except OSError:
             _DIGESTS[key] = ""
     return _DIGESTS[key]
+
+
+def _file_id(repo: Repository, path: str) -> int:
+    """A deterministic handle for a file whose own row lives in Orbit's graph.
+
+    Orbit's `gl_file` is in their database and their ids are not ours, so the
+    edge carries a stable id of our own and the join that crosses graphs goes
+    by path.
+    """
+    return stable_id(repo.project_id, repo.branch, repo.commit_sha, FILE_NODE, path)
 
 
 def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
@@ -235,6 +251,56 @@ def _innermost(spans: list[tuple[int, int, int]], offset: int) -> int | None:
     return min(holding, key=lambda span: span[1] - span[0])[2]
 
 
+def _identical_byte_edges(edge: EdgeType, repo: Repository,
+                          matched: list[provenance_module.Pair]) -> list[dict]:
+    """One edge per pair of files whose bytes hash the same.
+
+    Pure observation, and the row says only what was observed: two paths and
+    the digest they share. Why they are identical, and whether that is
+    intended, are not derived here -- spec 0001 §14 keeps the second as a
+    permanent UNKNOWN.
+    """
+    return [
+        _edge_row(
+            edge, repo,
+            _file_id(repo, pair.first_path), FILE_NODE,
+            _file_id(repo, pair.second_path), FILE_NODE,
+            source_path=pair.first_path,
+            target_path=pair.second_path,
+            content_sha256=pair.sha256,
+        )
+        for pair in matched
+    ]
+
+
+def _produces_edges(edge: EdgeType, repo: Repository,
+                    productions: list[provenance_module.Production]) -> list[dict]:
+    """One edge per artifact whose producer resolved to a file in the tree.
+
+    A producer the estate named that nothing in the tree matches writes no
+    edge: an edge needs both ends, and inventing the missing one would put a
+    file in the graph that the repository does not hold. It is counted in the
+    statistics instead, so that a producer named but not found does not read as
+    a producer never named.
+    """
+    return [
+        _edge_row(
+            edge, repo,
+            _file_id(repo, production.producer_path), FILE_NODE,
+            _file_id(repo, production.artifact_path), FILE_NODE,
+            subtype=production.evidence,
+            source_path=production.producer_path,
+            source_address=production.producer_address,
+            target_path=production.artifact_path,
+            evidence_path=production.evidence_path,
+            evidence_line=production.evidence_line,
+        )
+        for production in productions
+        if production.producer_path is not None
+        and production.producer_path != production.artifact_path
+    ]
+
+
 def _pointer_edges(edge: EdgeType, external_node: NodeType, repo: Repository,
                    surface_row: dict, surface_path: str,
                    found: tuple, spans: list[tuple[int, int, int]],
@@ -262,9 +328,7 @@ def _pointer_edges(edge: EdgeType, external_node: NodeType, repo: Repository,
                 # handle so the edge has a stable identity; the join that
                 # crosses graphs goes by target_path.
                 target_kind = FILE_NODE
-                target_id = stable_id(
-                    repo.project_id, repo.branch, repo.commit_sha, FILE_NODE, target_path
-                )
+                target_id = _file_id(repo, target_path)
         else:
             target_path = ""
             target_kind = EXTERNAL_REF_NODE
@@ -337,6 +401,8 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     external_node = ontology.nodes[EXTERNAL_REF_NODE]
     contains = ontology.edges[CONTAINS_EDGE]
     references = ontology.edges[REFERENCES_EDGE]
+    identical_bytes = ontology.edges[IDENTICAL_BYTES_EDGE]
+    produces = ontology.edges[PRODUCES_EDGE]
 
     result = RepoResult(
         repository=repo.name,
@@ -355,7 +421,12 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     # them to.
     pending: list[tuple[dict, str, tuple, list]] = []
 
-    for candidate in surfaces.walk_repo(repo.root, nested_repos):
+    # One walk. A surface is one of these files that also carries a name or a
+    # location this indexer recognises; every file is hashed, whether it is a
+    # surface or not.
+    walked = surfaces.walk_files(repo.root, nested_repos)
+
+    for candidate in surfaces.candidates(walked):
         reading = surfaces.read_candidate(candidate)
         detected, notes = surfaces.expand(repo.root, candidate, reading)
         for one in detected:
@@ -391,10 +462,20 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
         )
     edge_rows.extend(pointer_rows)
 
+    # Byte-identity and provenance, in one pass and reported in one dict: a
+    # count of matching pairs on its own over-reads badly, and on one real
+    # repository every one of 28 pairs had a producer the tool could not see.
+    scan = provenance_module.read_tree(repo.root, walked)
+    matched = provenance_module.pairs(scan.contents, scan.zero_byte)
+    productions = provenance_module.strongest(scan.productions)
+    edge_rows.extend(_identical_byte_edges(identical_bytes, repo, matched))
+    edge_rows.extend(_produces_edges(produces, repo, productions))
+
     result.clauses = len(clause_rows)
     result.edges = len(edge_rows)
     result.pointers = len(pointer_rows)
     result.external_refs = counts
+    result.identical_bytes = provenance_module.summary(scan, matched, productions)
 
     # Written once per table, not once per shape: CONTAINS and REFERENCES share
     # gl_context_edge, and a second replace_rows for the same snapshot would
@@ -491,6 +572,9 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
             "edges": sum(result.edges for result in results),
             "pointers": sum(result.pointers for result in results),
             "external_refs": _external_totals(results),
+            "identical_bytes": provenance_module.totals(
+                [result.identical_bytes for result in results]
+            ),
         },
         "processing": {
             "skipped_files": len(skipped),
@@ -510,6 +594,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                     "edges": result.edges,
                     "pointers": result.pointers,
                     "external_refs": dict(result.external_refs),
+                    "identical_bytes": dict(result.identical_bytes),
                 },
                 "processing": {
                     "skipped_files": len(result.skipped),
