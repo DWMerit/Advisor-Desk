@@ -87,7 +87,7 @@ class TestAddingAColumn(unittest.TestCase):
         self.assertIn("client", node.column_names)
         connection = store.connect(db)
         outcome = store.reconcile(connection, node)
-        self.assertEqual(outcome["added"], ["client"])
+        self.assertEqual(outcome["columns_added"], ["client"])
         self.assertIn("client", store.existing_columns(connection, node.table))
         connection.close()
 

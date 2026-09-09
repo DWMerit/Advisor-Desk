@@ -3,4 +3,7 @@
 Writes only ``gl_context_*`` tables. Never writes to Orbit's own tables.
 """
 
-__all__ = ["ontology", "workspace", "surfaces", "store", "indexer", "cli"]
+__all__ = [
+    "ontology", "workspace", "surfaces", "clauses", "store", "indexer",
+    "retrieve", "cli",
+]

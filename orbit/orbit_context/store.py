@@ -18,7 +18,7 @@ from pathlib import Path
 
 import duckdb
 
-from .ontology import NodeType
+from .ontology import TableShape
 
 DEFAULT_DB_PATH = Path(os.path.expanduser("~/.orbit-context/context.duckdb"))
 
@@ -70,7 +70,7 @@ def existing_columns(connection, table: str) -> list[str]:
     return [row[0] for row in rows]
 
 
-def reconcile(connection, node: NodeType) -> dict[str, list[str]]:
+def reconcile(connection, node: TableShape) -> dict[str, list[str]]:
     """Create the table from the YAML, or bring an existing one up to it.
 
     Returns the columns added, and any columns the table carries that the YAML
@@ -86,10 +86,10 @@ def reconcile(connection, node: NodeType) -> dict[str, list[str]]:
             connection.execute(node.add_column_sql(name))
             added.append(name)
     undeclared = [name for name in present if name not in node.column_names]
-    return {"added": added, "undeclared": undeclared}
+    return {"columns_added": added, "columns_not_declared_in_ontology": undeclared}
 
 
-def replace_rows(connection, node: NodeType, traversal_path: str, project_id: int,
+def replace_rows(connection, node: TableShape, traversal_path: str, project_id: int,
                  branch: str, commit_sha: str, rows: list[dict]) -> int:
     """Replace the rows for one indexed snapshot.
 

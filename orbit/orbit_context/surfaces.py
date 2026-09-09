@@ -44,6 +44,16 @@ SURFACE_KINDS = (
 # hook and MCP rows, and is not itself a row.
 SETTINGS_CONTAINER = "settings-container"
 
+# The surfaces cut into clauses. Whole-file, and read as Markdown-shaped text.
+# A hook definition and an MCP server are entries inside JSON; a hook target is
+# whatever file a command happens to point at. Neither is segmented here.
+SEGMENTED_KINDS = (
+    INSTRUCTION_SURFACE,
+    SKILL_PACKAGE,
+    AGENT_DEFINITION,
+    COMMAND_DEFINITION,
+)
+
 # Matched on the file's basename.
 SURFACE_BASENAMES: dict[str, str] = {
     "CLAUDE.md": INSTRUCTION_SURFACE,

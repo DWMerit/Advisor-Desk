@@ -1,6 +1,10 @@
 """Read GitLab-format ontology YAML and derive the DuckDB table shape from it.
 
-The table is created from ``storage.columns`` in the YAML, never from a
+Two kinds of file, in the tree shape GitLab uses: ``nodes/<domain>/*.yaml``
+declares node types, ``edges/<domain>/*.yaml`` declares edge types with
+``variants`` -- one edge type, many ``from_node``/``to_node`` pairs.
+
+Every table is created from ``storage.columns`` in the YAML, never from a
 hardcoded ``CREATE TABLE``. Adding a column to the YAML adds it to the table.
 """
 
@@ -59,11 +63,9 @@ class Column:
 
 
 @dataclass(frozen=True)
-class NodeType:
-    """One ontology node file, reduced to what the indexer needs."""
+class TableShape:
+    """What every ontology file, node or edge, gives the indexer: a table."""
 
-    node_type: str
-    domain: str
     table: str
     columns: tuple[Column, ...]
     source_file: Path
@@ -87,17 +89,39 @@ class NodeType:
         return f"ALTER TABLE {self.table} ADD COLUMN {column.name} {column.duckdb_type}"
 
 
-def load_node(path: str | Path) -> NodeType:
-    """Load one node YAML file in GitLab's format."""
-    path = Path(path)
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
-        raise OntologyError(f"{path}: not a YAML mapping")
+@dataclass(frozen=True)
+class NodeType(TableShape):
+    """One ontology node file, reduced to what the indexer needs."""
 
-    for required in ("node_type", "domain", "destination_table", "properties", "storage"):
-        if required not in document:
-            raise OntologyError(f"{path}: missing {required!r}")
+    node_type: str
+    domain: str
 
+
+@dataclass(frozen=True)
+class EdgeVariant:
+    """One from/to pair an edge type is declared for."""
+
+    from_node: str
+    to_node: str
+
+
+@dataclass(frozen=True)
+class EdgeType(TableShape):
+    """One ontology edge file. Many variants, one destination table."""
+
+    edge_type: str
+    domain: str
+    variants: tuple[EdgeVariant, ...]
+
+    def allows(self, from_node: str, to_node: str) -> bool:
+        return any(
+            variant.from_node == from_node and variant.to_node == to_node
+            for variant in self.variants
+        )
+
+
+def _columns(path: Path, document: dict) -> tuple[Column, ...]:
+    """The storage columns of one ontology file, checked against its properties."""
     properties = document["properties"]
     storage_columns = document["storage"].get("columns")
     if not storage_columns:
@@ -122,13 +146,61 @@ def load_node(path: str | Path) -> NodeType:
                 nullable=bool(prop.get("nullable", True)),
             )
         )
+    return tuple(columns)
 
+
+def _document(path: Path, required: tuple[str, ...]) -> dict:
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise OntologyError(f"{path}: not a YAML mapping")
+    for key in required:
+        if key not in document:
+            raise OntologyError(f"{path}: missing {key!r}")
+    return document
+
+
+def load_node(path: str | Path) -> NodeType:
+    """Load one node YAML file in GitLab's format."""
+    path = Path(path)
+    document = _document(
+        path, ("node_type", "domain", "destination_table", "properties", "storage")
+    )
     return NodeType(
         node_type=document["node_type"],
         domain=document["domain"],
         table=document["destination_table"],
-        columns=tuple(columns),
+        columns=_columns(path, document),
         source_file=path,
+    )
+
+
+def load_edge(path: str | Path) -> EdgeType:
+    """Load one edge YAML file in GitLab's format.
+
+    An edge type is declared once and carries ``variants`` -- the from/to pairs
+    it is allowed between -- rather than being declared once per pair.
+    """
+    path = Path(path)
+    document = _document(
+        path,
+        ("edge_type", "domain", "destination_table", "variants", "properties", "storage"),
+    )
+    variants = []
+    for entry in document["variants"]:
+        for key in ("from_node", "to_node"):
+            if key not in entry:
+                raise OntologyError(f"{path}: a variant is missing {key!r}")
+        variants.append(EdgeVariant(entry["from_node"], entry["to_node"]))
+    if not variants:
+        raise OntologyError(f"{path}: variants is empty")
+
+    return EdgeType(
+        edge_type=document["edge_type"],
+        domain=document["domain"],
+        table=document["destination_table"],
+        columns=_columns(path, document),
+        source_file=path,
+        variants=tuple(variants),
     )
 
 
@@ -144,3 +216,45 @@ def load_domain(root: str | Path = DEFAULT_ONTOLOGY_ROOT, domain: str = "context
     if not nodes:
         raise OntologyError(f"{directory}: no node YAML files found")
     return nodes
+
+
+def load_edge_domain(root: str | Path = DEFAULT_ONTOLOGY_ROOT,
+                     domain: str = "context") -> dict[str, EdgeType]:
+    """Load every edge YAML under ``root/edges/<domain>/``, keyed by edge_type."""
+    directory = Path(root) / "edges" / domain
+    if not directory.is_dir():
+        raise OntologyError(f"{directory}: no such ontology directory")
+    edges = {}
+    for path in sorted(directory.glob("*.yaml")):
+        edge = load_edge(path)
+        edges[edge.edge_type] = edge
+    if not edges:
+        raise OntologyError(f"{directory}: no edge YAML files found")
+    return edges
+
+
+@dataclass(frozen=True)
+class Ontology:
+    """One domain: its node types and its edge types."""
+
+    nodes: dict[str, NodeType]
+    edges: dict[str, EdgeType]
+
+    @property
+    def tables(self) -> tuple[TableShape, ...]:
+        """Every shape that needs a table, one per table.
+
+        Edge types share a destination table -- their whole point -- so the
+        first declaring shape stands for the table and later ones are folded in
+        only if they add columns.
+        """
+        seen: dict[str, TableShape] = {}
+        for shape in (*self.nodes.values(), *self.edges.values()):
+            seen.setdefault(shape.table, shape)
+        return tuple(seen.values())
+
+
+def load(root: str | Path | None = None, domain: str = "context") -> Ontology:
+    """Load a whole domain -- nodes and edges."""
+    root = Path(root) if root else DEFAULT_ONTOLOGY_ROOT
+    return Ontology(nodes=load_domain(root, domain), edges=load_edge_domain(root, domain))

@@ -17,9 +17,10 @@ attaches. Orbit's CLI reads one file or the other.
 
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
 
-Phase 1, tickets 01–02. One node type — `Surface` — covering every governance
-object: instruction surfaces, skill packages, agent definitions, slash commands,
-hook definitions and MCP servers.
+Phase 1, tickets 01–03. Two node types and one edge type. `Surface` covers every
+governance object — instruction surfaces, skill packages, agent definitions,
+slash commands, hook definitions and MCP servers. `Clause` is one addressable
+fragment inside a surface, and `CONTAINS` holds the two together.
 
 ## Run it
 
@@ -33,6 +34,17 @@ orbit/bin/orbit-context index /home/user --stats
 # Somewhere other than ~/.orbit-context/context.duckdb.
 orbit/bin/orbit-context index /home/user --db /tmp/scratch.duckdb
 ```
+
+Then read one rule back, by name, out of the file it lives in:
+
+```sh
+cd /path/to/the/repository
+orbit/bin/orbit-context show 'CLAUDE.md#Estimating rules#M6 anchors'
+```
+
+The bytes go to stdout and the locator to stderr, so redirecting stdout gives
+that span of the file and nothing else. `--repo` names a path inside the
+repository if you are not standing in it.
 
 Then query it with Orbit's own CLI, pointed at our file:
 
@@ -54,6 +66,24 @@ orbit local sql "SELECT c.path, c.surface_kind, c.size_bytes, f.language
                  FROM gl_context_surface c
                  JOIN gl_file f ON f.path = c.path AND f.project_id = c.project_id
                  ORDER BY c.size_bytes DESC"
+
+# Every rule in an instruction surface, with its address and what it weighs.
+orbit local sql "SELECT fqn, end_byte - start_byte AS bytes, start_line
+                 FROM gl_context_clause
+                 WHERE surface_path = 'CLAUDE.md' AND clause_type = 'list-rule'
+                 ORDER BY bytes DESC"
+
+# How deep the nesting goes, walked over CONTAINS.
+orbit local sql "WITH RECURSIVE walk(id, depth) AS (
+                   SELECT target_id, 1 FROM gl_context_edge
+                    WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Surface'
+                   UNION ALL
+                   SELECT e.target_id, walk.depth + 1
+                     FROM gl_context_edge e JOIN walk ON e.source_id = walk.id
+                    WHERE e.relationship_kind = 'CONTAINS' AND e.source_kind = 'Clause')
+                 SELECT c.surface_path, max(walk.depth) AS deepest
+                 FROM walk JOIN gl_context_clause c ON c.id = walk.id
+                 GROUP BY 1 ORDER BY 2 DESC"
 ```
 
 Requires Python 3 and `duckdb`; `pyyaml` for reading the ontology and
@@ -94,12 +124,23 @@ alone will match a same-named file in a different repository. Join on
 
 ## The table comes from the YAML
 
-`orbit/ontology/nodes/context/surface.yaml` is written in GitLab's node format,
-copied from their `config/ontology/nodes/source_code/file.yaml`, so it can be
-overlaid onto their ontology tree or contributed upstream unchanged.
+Three files, in GitLab's own tree shape, each copied from the shape of one of
+theirs, so any of them can be overlaid onto their ontology tree or contributed
+upstream unchanged:
 
-The indexer builds the DuckDB table from that file's `storage.columns`. Adding a
+| File | Copied from | Table |
+|---|---|---|
+| `ontology/nodes/context/surface.yaml` | `nodes/source_code/file.yaml` | `gl_context_surface` |
+| `ontology/nodes/context/clause.yaml` | `nodes/source_code/definition.yaml` | `gl_context_clause` |
+| `ontology/edges/context/contains.yaml` | their edge format, with `variants` | `gl_context_edge` |
+
+The indexer builds each DuckDB table from that file's `storage.columns`. Adding a
 column to the YAML adds it to the table on the next index; no Python change.
+
+An edge type is declared once and carries the `from_node`/`to_node` pairs it is
+allowed between, rather than being declared once per pair. Those `variants` are
+load-bearing, not documentation: writing an edge the YAML declares no variant for
+fails the index.
 ClickHouse storage types are mapped to DuckDB types (`Int64` → `BIGINT`,
 `String` and `LowCardinality(String)` → `VARCHAR`); an unmapped type fails the
 index rather than guessing.
@@ -165,6 +206,75 @@ sum(frontmatter_bytes)   8,341     <- what a cold session actually pays
 Both are NULL, never 0, for a surface that was not read as text. 0 means
 measured and absent; NULL means unknown.
 
+## A surface is cut into clauses
+
+A 17 KB instruction surface is dozens of rules with different lifetimes.
+Addressed as one file, *which rule* is unanswerable — so every whole-file text
+surface is segmented, and each fragment becomes a `gl_context_clause` row.
+
+Four kinds, by Markdown structure alone:
+
+| `clause_type` | Is |
+|---|---|
+| `heading-section` | A heading and everything under it, to the next heading at the same level or above. |
+| `list-rule` | One list item beneath a heading, and each item nested inside it. |
+| `frontmatter-field` | One top-level key of the leading `---` block. |
+| `code-block` | One fenced block. |
+
+Structure only. Nothing here classifies what a clause *means*; that would be the
+tool deciding, and an address is not for deciding.
+
+Hook definitions and MCP servers are not segmented — they are entries inside
+JSON, not Markdown — and neither is a `hook-target`, which is whatever file a
+command happened to point at.
+
+### `fqn` is the address
+
+Their convention: the surface path, then one `#` per level of structure.
+
+```
+CLAUDE.md#Estimating rules#M6 anchors
+CLAUDE.md#Estimating rules#M6 anchors#Cast-in channel#Edge distance is 75 mm
+.claude/skills/anchor-schedule/SKILL.md#description
+```
+
+Every segment is the estate's own text — a heading, a list item's first line, a
+frontmatter key, a fence's language. Nothing is invented to make it unique, so
+two sibling headings with the same words share one address. `show` prints every
+match rather than picking one; that is a fact about the file, not a collision to
+resolve.
+
+### The offsets are byte offsets
+
+`start_byte` and `end_byte` are offsets into the file's UTF-8 bytes, and the span
+is `[start_byte, end_byte)`. **Not character offsets.** One em dash above a
+clause and a character offset lands the retrieved span short of its own text,
+with nothing to say so. `start_line` and `end_line` are alongside them, 1-based
+and inclusive, for a locator a person can read.
+
+### No clause text is stored
+
+`content` is declared `virtual` on `Clause` exactly as it is on `Surface`, and is
+never written. The row carries a path and a span; `show` opens the file, seeks,
+and reads.
+
+What that guarantees is that the bytes are the file's own, not a copy the graph
+kept — never that they are current. Edit the file and the offsets stand still
+until the next index; re-index and they move.
+
+### Depth is not a column
+
+A clause nested inside another is a `CONTAINS` edge between them: `Surface →
+Clause` for a clause nothing else encloses, `Clause → Clause` for the rest. So
+"how deep does this nest" is a walk of the graph at query time, as in the
+recursive query above, rather than a number frozen at index time.
+
+Edges land in `gl_context_edge` in their column shape — `source_id`,
+`source_kind`, `relationship_kind`, `target_id`, `target_kind`,
+`traversal_path` — plus the `project_id`, `branch` and `commit_sha` that make an
+edge part of one snapshot, and so replaceable by a re-index alongside the rows it
+joins.
+
 ## Where a hook command points
 
 Each `hook-definition` row carries its `matcher` **quoted verbatim** from the
@@ -212,17 +322,18 @@ absent:
 ## Statistics
 
 `index` prints JSON in Orbit's shape — `repository`, `path`, `time_seconds`,
-`graph`, `processing`, `database_path`, and `detailed` under `--stats`. Skipped
-entries carry `reason`, errored entries carry `kind`, matching their
-`SkippedFile` and `ErroredFile`. A `repositories` array itemises each repository
-found under the indexed root, and a `schema` block reports which columns the
-YAML added to the table.
+`graph`, `processing`, `database_path`, and `detailed` under `--stats`. `graph`
+counts `repositories`, `surfaces`, `clauses` and `edges`. Skipped entries carry
+`reason`, errored entries carry `kind`, matching their `SkippedFile` and
+`ErroredFile`. A `repositories` array itemises each repository found under the
+indexed root, and `schema` reports, per table, which columns the YAML added and
+which the table carries that the YAML does not declare.
 
 ## Re-indexing
 
 Re-indexing replaces the rows for the indexed
-`(traversal_path, project_id, branch, commit_sha)` rather than adding a second
-copy. `project_id` is part of that key because every local row carries the same
+`(traversal_path, project_id, branch, commit_sha)` — in all three tables — rather
+than adding a second copy. `project_id` is part of that key because every local row carries the same
 empty `traversal_path`. Row ids are derived from the same tuple plus the path,
 so they are stable across re-index.
 
@@ -233,7 +344,7 @@ that moves leaves the previous snapshot's rows in place.
 
 - **Never writes to Orbit's tables.** `store.assert_context_table` refuses any
   table not prefixed `gl_context_`.
-- **No prose columns.** No `summary`, no `purpose`.
+- **No prose columns.** No `summary`, no `purpose`, and no clause text.
 - **Constrained vocabulary** on tool-authored fields — reasons, surface kinds,
   column names, statistics keys. Enforced by `orbit/tests/test_vocabulary.py`,
   never over paths or quoted system messages.

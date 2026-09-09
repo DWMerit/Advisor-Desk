@@ -15,9 +15,9 @@ from pathlib import Path
 from . import support  # noqa: F401
 
 from build_estate import build
-from orbit_context import settings, surfaces
+from orbit_context import clauses, settings, surfaces
 from orbit_context.indexer import index
-from orbit_context.ontology import load_domain
+from orbit_context.ontology import load
 
 BANNED = (
     "broken", "dangling", "orphaned", "obsolete", "stale", "dead", "unused",
@@ -66,10 +66,22 @@ class TestVocabulary(unittest.TestCase):
                 value = getattr(settings, name)
                 self.assertEqual(offending_words(value), [], f"{name} = {value!r}")
 
+    def test_clause_types(self):
+        for clause_type in clauses.CLAUSE_TYPES:
+            self.assertEqual(offending_words(clause_type), [], clause_type)
+
     def test_column_names(self):
-        for node in load_domain().values():
-            for column in node.column_names:
+        # Nodes and edges alike: every column name is the tool's own word.
+        for shape in load().tables:
+            for column in shape.column_names:
                 self.assertEqual(offending_words(column), [], column)
+
+    def test_edge_and_variant_names(self):
+        for edge in load().edges.values():
+            self.assertEqual(offending_words(edge.edge_type), [], edge.edge_type)
+            for variant in edge.variants:
+                for node_type in (variant.from_node, variant.to_node):
+                    self.assertEqual(offending_words(node_type), [], node_type)
 
     def test_statistics_keys_and_tool_authored_values(self):
         """Lint every key, and every value the tool authored.

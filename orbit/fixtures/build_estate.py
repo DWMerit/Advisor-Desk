@@ -18,14 +18,33 @@ import tempfile
 from pathlib import Path
 
 # Byte-identical in both repositories, and under two different names in `alpha`.
+#
+# Three headings deep, so a rule nested under `### Cast-in channel` has to be
+# reached through the whole heading tree. Non-ASCII above it on purpose -- the
+# em dash, the curly quotes and the >= sign each cost more bytes than
+# characters, so a clause addressed by a character offset lands short of its
+# own text and nothing says so.
 SHARED_INSTRUCTIONS = (
     "# Estimating rules\n"
     "\n"
+    "Dimensions are millimetres \u2014 the \u201cmm\u201d is written out, never assumed.\n"
+    "\n"
     "## M6 anchors\n"
+    "\n"
     "Anchor spacing is stated on the drawing, never assumed.\n"
     "\n"
+    "### Cast-in channel\n"
+    "\n"
+    "- Spacing is read off the section, not off the elevation.\n"
+    "- Edge distance \u2265 75 mm from the nearest saw cut.\n"
+    "\n"
     "## Takeoff\n"
+    "\n"
     "Quantities come from the marked-up set, not from the schedule.\n"
+    "\n"
+    "```sh\n"
+    "orbit-context show 'CLAUDE.md#Estimating rules#Takeoff'\n"
+    "```\n"
 )
 
 # Not valid UTF-8, and named like a surface: it must be recorded with a reason

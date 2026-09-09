@@ -1,0 +1,157 @@
+# orbit/ontology/nodes/context/clause.yaml
+#
+# Mirrors config/ontology/nodes/source_code/definition.yaml from
+# gitlabhq/orbit-knowledge-graph @ 0fe19ac. Their Definition is a named,
+# addressable fragment inside a file, carrying start_line/end_line and
+# start_byte/end_byte; Clause is the same idea over prose.
+#
+# The reason granularity is sub-file: a 17 KB instruction surface is dozens of
+# rules with different lifetimes, and addressed as one file, *which rule* is
+# unanswerable.
+
+node_type: Clause
+domain: context
+description: An addressable fragment within a surface -- a heading section, a list rule, a frontmatter field or a code block
+label: fqn
+default_columns: [id, fqn, clause_type, surface_path, start_line, end_line]
+destination_table: gl_context_clause
+sort_key: [traversal_path, project_id, branch, surface_path, start_byte]
+
+style:
+  size: 16
+  color: "#FBBF24"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_context_clause
+      key_column: id
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Git branch."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    mutable: false
+    description: "Indexed commit SHA."
+
+  surface_path:
+    type: string
+    source: surface_path
+    nullable: false
+    mutable: false
+    description: "Repository-relative path of the surface this clause sits in."
+
+  fqn:
+    type: string
+    source: fqn
+    nullable: false
+    mutable: false
+    description: "The clause's address, in their convention: the surface path, then one '#' per level of Markdown structure -- CLAUDE.md#Estimating rules#M6 anchors. Segments are the estate's own text, so two siblings with the same text share an fqn; retrieval reports every match rather than picking one."
+
+  heading:
+    type: string
+    source: heading
+    nullable: false
+    mutable: false
+    description: "Text of the nearest enclosing heading -- the clause's own heading where it is a heading-section. Empty where no heading encloses it."
+
+  clause_type:
+    type: string
+    source: clause_type
+    nullable: false
+    mutable: false
+    description: "heading-section | list-rule | frontmatter-field | code-block. Markdown structure only; never what the clause means."
+    selectivity: low
+
+  start_line:
+    type: int64
+    source: start_line
+    nullable: false
+    mutable: false
+    description: "First line of the clause, 1-based."
+
+  end_line:
+    type: int64
+    source: end_line
+    nullable: false
+    mutable: false
+    description: "Last line of the clause, 1-based and inclusive."
+
+  start_byte:
+    type: int64
+    source: start_byte
+    nullable: false
+    mutable: false
+    description: "Byte offset of the clause's first byte in the file. A byte offset, never a character offset: with a character offset any non-ASCII content earlier in the file silently shifts the retrieved span."
+
+  end_byte:
+    type: int64
+    source: end_byte
+    nullable: false
+    mutable: false
+    description: "Byte offset one past the clause's last byte, so the span is [start_byte, end_byte) and end_byte - start_byte is its size."
+
+  content:
+    type: string
+    virtual:
+      service: filesystem
+      lookup: file_span
+      depends_on: [project_id, commit_sha, branch, surface_path, start_byte, end_byte]
+    nullable: true
+    description: "The clause's text, read from the file at its byte offsets at query time. Never stored."
+
+storage:
+  settings:
+    index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: surface_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: fqn, type: "String", codec: ["ZSTD(3)"]}
+    - {name: heading, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: clause_type, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: start_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: end_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: start_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: end_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_fqn, column: fqn, type: "text(tokenizer = splitByString(['#']))", granularity: 1}
+    - {name: idx_surface_path, column: surface_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
