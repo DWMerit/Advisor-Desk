@@ -15,7 +15,7 @@ from pathlib import Path
 from . import support  # noqa: F401
 
 from build_estate import build
-from orbit_context import surfaces
+from orbit_context import settings, surfaces
 from orbit_context.indexer import index
 from orbit_context.ontology import load_domain
 
@@ -52,11 +52,19 @@ class TestVocabulary(unittest.TestCase):
                 self.assertEqual(offending_words(value), [], f"{name} = {value!r}")
 
     def test_surface_kinds(self):
-        kinds = set(surfaces.SURFACE_BASENAMES.values()) | set(
-            surfaces.SURFACE_RELATIVE_PATHS.values()
+        detected = (
+            set(surfaces.SURFACE_BASENAMES.values())
+            | set(surfaces.SURFACE_RELATIVE_PATHS.values())
+            | {kind for _, _, kind in surfaces.SURFACE_DIRECTORIES}
         )
-        for kind in kinds:
+        for kind in set(surfaces.SURFACE_KINDS) | detected:
             self.assertEqual(offending_words(kind), [], kind)
+
+    def test_hook_command_resolutions(self):
+        for name in dir(settings):
+            if name.startswith("RESOLUTION_"):
+                value = getattr(settings, name)
+                self.assertEqual(offending_words(value), [], f"{name} = {value!r}")
 
     def test_column_names(self):
         for node in load_domain().values():

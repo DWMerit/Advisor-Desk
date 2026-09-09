@@ -106,6 +106,9 @@ class TestJoinToGlFile(unittest.TestCase):
             "SELECT c.path, c.size_bytes, f.size_bytes "
             "FROM gl_context_surface c "
             "JOIN orbit.gl_file f ON f.path = c.path AND f.project_id = c.project_id "
+            # A surface that is an entry inside a file carries the size of the
+            # entry, so only whole-file surfaces match gl_file's size.
+            "WHERE c.start_line IS NULL "
             "ORDER BY c.path"
         )
         self.assertGreater(len(rows), 0)

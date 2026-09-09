@@ -30,22 +30,52 @@ class RepoResult:
     errored: list[dict] = field(default_factory=list)
 
 
-def _row(node: NodeType, repo: Repository, candidate: surfaces.Candidate,
-         reading: surfaces.Reading) -> dict:
+def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
+    # A settings file holds many rows at one path, so the path alone no longer
+    # identifies a surface. Kind and offset complete it -- the offset rather
+    # than the line, because a settings file written on one line would
+    # otherwise collapse all its hooks into a single row.
+    identity = (
+        repo.project_id, repo.branch, repo.commit_sha, detected.relative_path,
+        detected.kind, detected.start_offset,
+    )
     values = {
-        "id": stable_id(repo.project_id, repo.branch, repo.commit_sha, candidate.relative_path),
+        "id": stable_id(*("" if part is None else part for part in identity)),
         "traversal_path": LOCAL_TRAVERSAL_PATH,
         "project_id": repo.project_id,
         "branch": repo.branch,
         "commit_sha": repo.commit_sha,
-        "path": candidate.relative_path,
-        "surface_kind": candidate.kind,
-        "size_bytes": reading.size_bytes,
-        "reason": reading.reason,
+        "path": detected.relative_path,
+        "name": detected.name,
+        "surface_kind": detected.kind,
+        "size_bytes": detected.size_bytes,
+        "frontmatter_bytes": detected.frontmatter_bytes,
+        "body_bytes": detected.body_bytes,
+        "start_line": detected.start_line,
+        "end_line": detected.end_line,
+        "matcher": detected.matcher,
+        "target_path": detected.target_path,
+        "target_resolution": detected.target_resolution,
+        "reason": detected.reason,
     }
     # Columns added to the YAML but not yet populated by a detector land as
     # NULL rather than blocking the write.
     return {name: values.get(name) for name in node.column_names}
+
+
+def _count(result: RepoResult, path: str, reason: str, detail: str, errored: bool) -> None:
+    """One outcome, in the shape Orbit's own statistics use.
+
+    A row that indexed is counted; a row or note that did not carries its
+    reason, so a surface that is present but unindexed does not read as one
+    that is absent.
+    """
+    if not reason:
+        result.surfaces += 1
+    elif errored:
+        result.errored.append({"path": path, "kind": reason, "detail": detail})
+    else:
+        result.skipped.append({"path": path, "reason": reason, "detail": detail})
 
 
 def index_repository(connection, node: NodeType, repo: Repository,
@@ -57,26 +87,24 @@ def index_repository(connection, node: NodeType, repo: Repository,
         branch=repo.branch,
         commit_sha=repo.commit_sha,
     )
-    rows = []
+    # Keyed by id: one hook script targeted by two hooks is one hook-target
+    # row, not two identical ones.
+    rows: dict[int, dict] = {}
     for candidate in surfaces.walk_repo(repo.root, nested_repos):
         reading = surfaces.read_candidate(candidate)
-        rows.append(_row(node, repo, candidate, reading))
-        if reading.indexed:
-            result.surfaces += 1
-        elif reading.errored:
-            result.errored.append(
-                {"path": candidate.relative_path, "kind": reading.reason,
-                 "detail": reading.detail}
-            )
-        else:
-            result.skipped.append(
-                {"path": candidate.relative_path, "reason": reading.reason,
-                 "detail": reading.detail}
-            )
+        detected, notes = surfaces.expand(repo.root, candidate, reading)
+        for one in detected:
+            row = _row(node, repo, one)
+            if row["id"] in rows:
+                continue
+            rows[row["id"]] = row
+            _count(result, one.relative_path, one.reason, one.detail, one.errored)
+        for note in notes:
+            _count(result, note.relative_path, note.reason, note.detail, note.errored)
 
     store.replace_rows(
         connection, node, LOCAL_TRAVERSAL_PATH, repo.project_id,
-        repo.branch, repo.commit_sha, rows,
+        repo.branch, repo.commit_sha, list(rows.values()),
     )
     return result
 

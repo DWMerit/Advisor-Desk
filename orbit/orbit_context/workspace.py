@@ -158,4 +158,4 @@ def discover_repos(root: str | Path) -> list[Path]:
             if is_git_repo(entry):
                 found.append(entry)
             stack.append(entry)
-    return sorted(set(found), key=lambda p: len(p.parts))
+    return sorted(set(found), key=lambda p: (len(p.parts), p))

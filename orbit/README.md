@@ -17,7 +17,9 @@ attaches. Orbit's CLI reads one file or the other.
 
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
 
-Phase 1, ticket 01. One node type — `Surface` — detected by filename convention.
+Phase 1, tickets 01–02. One node type — `Surface` — covering every governance
+object: instruction surfaces, skill packages, agent definitions, slash commands,
+hook definitions and MCP servers.
 
 ## Run it
 
@@ -35,8 +37,18 @@ orbit/bin/orbit-context index /home/user --db /tmp/scratch.duckdb
 Then query it with Orbit's own CLI, pointed at our file:
 
 ```sh
-orbit local sql "SELECT path, surface_kind, size_bytes FROM gl_context_surface
+orbit local sql "SELECT surface_kind, name, path, size_bytes FROM gl_context_surface
                  ORDER BY size_bytes DESC"
+
+# What a cold session pays for skills, against what the files weigh.
+orbit local sql "SELECT sum(frontmatter_bytes) AS boot, sum(size_bytes) AS total
+                 FROM gl_context_surface WHERE surface_kind = 'skill-package'"
+
+# Every hook, where it is defined, and where its command goes.
+orbit local sql "SELECT path || ':' || start_line AS locator, name, matcher,
+                        target_resolution, target_path
+                 FROM gl_context_surface
+                 WHERE surface_kind = 'hook-definition' ORDER BY locator"
 
 orbit local sql "SELECT c.path, c.surface_kind, c.size_bytes, f.language
                  FROM gl_context_surface c
@@ -44,7 +56,9 @@ orbit local sql "SELECT c.path, c.surface_kind, c.size_bytes, f.language
                  ORDER BY c.size_bytes DESC"
 ```
 
-Requires Python 3 and `duckdb`; `pyyaml` for reading the ontology.
+Requires Python 3 and `duckdb`; `pyyaml` for reading the ontology and
+Markdown frontmatter. JSON is read by `orbit_context/jsonloc.py`, which keeps
+every value's position so a hook entry can carry a `file:line` locator.
 
 ## Tests
 
@@ -52,7 +66,7 @@ Requires Python 3 and `duckdb`; `pyyaml` for reading the ontology.
 python3 -m unittest discover -s orbit/tests -t .
 ```
 
-They build a throwaway two-repository estate in a temp directory
+They build a throwaway three-repository estate in a temp directory
 (`orbit/fixtures/build_estate.py`) and index it into a temp DuckDB. Nothing
 touches `~/.orbit/graph.duckdb` or `~/.orbit-context/context.duckdb`. The fixture is built by script, never
 committed: a committed fixture would mean nested `.git` directories that every
@@ -95,15 +109,82 @@ caller reads the bytes.
 
 ## What counts as a surface
 
-Phase 1 detects `instruction-surface` only, by filename:
+Six kinds, plus one that is additive. Not all of them are files.
 
-| Matched on | Names |
+| `surface_kind` | Detected by |
 |---|---|
-| basename | `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules` |
-| repository-relative path | `.github/copilot-instructions.md` |
+| `instruction-surface` | basename `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursorrules`; path `.github/copilot-instructions.md` |
+| `skill-package` | a directory holding a `SKILL.md` whose frontmatter declares `name` and `description` |
+| `agent-definition` | a `.md` file under `.claude/agents/` whose frontmatter declares `name` and `description` |
+| `command-definition` | a `.md` file under `.claude/commands/` |
+| `hook-definition` | one command entry inside a settings file's `hooks` block |
+| `mcp-config` | one server inside `mcpServers` (or VS Code's `servers`), in `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` or a settings file |
+| `hook-target` | a file a hook command resolves to |
+
+Settings files read: `.claude/settings.json` and `.claude/settings.local.json`.
 
 `node_modules`, `target`, `vendor`, `.venv`, `venv`, `__pycache__` and `.git`
 are not walked.
+
+**Rows are additive.** A hook script is a hook target *and* whatever else it is.
+`hook-target` is written as well as, never instead of, another kind for the same
+file — a `SKILL.md` invoked by a hook is two rows, not one argument about which
+it really is. Two hooks pointing at one script still make one `hook-target` row.
+
+A `SKILL.md` or an agent file that declares no `name` and `description` is not
+one. It is reported in the statistics as `frontmatter_declaration_absent`, so
+that a file which is present but not a skill does not read as absent.
+
+## Not every surface is a file
+
+A hook definition and an MCP server are entries *inside* a file. Those rows
+carry a line locator and the size of the entry:
+
+| Column | Whole-file surface | Entry inside a file |
+|---|---|---|
+| `path` | the file | the file the entry sits in |
+| `start_line` / `end_line` | NULL | the entry's span, 1-based |
+| `size_bytes` | the file size | the entry's bytes |
+
+So `path || ':' || start_line` is the locator for a hook, and
+`WHERE start_line IS NULL` is how to ask for whole-file surfaces only.
+
+## Frontmatter is measured apart from the body
+
+`frontmatter_bytes` and `body_bytes` sum to `size_bytes` for anything read as
+text. They are separate columns because they load at different times: a skill's
+frontmatter description loads at boot for **every** session, and the body only
+when the skill is invoked. Conflating them misstates the boot cost by an order
+of magnitude — measured over 12 real skill packages:
+
+```
+sum(size_bytes)        214,398
+sum(frontmatter_bytes)   8,341     <- what a cold session actually pays
+```
+
+Both are NULL, never 0, for a surface that was not read as text. 0 means
+measured and absent; NULL means unknown.
+
+## Where a hook command points
+
+Each `hook-definition` row carries its `matcher` **quoted verbatim** from the
+settings file, and where its command resolved:
+
+| `target_resolution` | Means | `target_path` |
+|---|---|---|
+| `in-tree` | The command names a file in this repository. | that file, repository-relative |
+| `path-lookup` | Nothing in the command looks like a path; the program is found on `PATH`. | empty |
+| `no-indexed-target-match` | The command names a path, and no file is there. | empty |
+| `unexpanded-variable` | The path holds a variable this indexer does not expand. | empty |
+| `unparsable-command` | The command line could not be split into words. | empty |
+
+`$CLAUDE_PROJECT_DIR` is expanded; nothing else is. The distinction the ticket
+asks for is the first two rows of that table: *"we cannot see where this program
+lives"* and *"the script is not here"* are different statements about the
+estate, and are never merged.
+
+`matcher` is NULL where the entry declares no matcher key, and empty where it
+declares an empty one.
 
 ## Coverage is a record, not a footnote
 
@@ -118,10 +199,15 @@ Every candidate becomes a row, including ones that could not be read. The
 | `read_error` | The filesystem refused the read. |
 | `not_a_file` | The path is not a regular file. |
 
-One case produces no row, because it has no branch or commit to carry:
-`outside_indexed_repository`, a surface under the indexed root that belongs to
-no git repository. It is reported in the statistics so that a surface which is
-present but unindexed does not read as a surface that is absent.
+Three cases produce no row, and are reported in the statistics instead, so that
+a surface which is present but unindexed does not read as a surface that is
+absent:
+
+| Reported | Why there is no row |
+|---|---|
+| `outside_indexed_repository` | A surface under the indexed root belonging to no git repository: no branch or commit to carry. |
+| `frontmatter_declaration_absent` | A `SKILL.md` or agent file that declares no `name` and `description`. Calling it a skill would be the tool deciding. |
+| `invalid_json` | A settings or `.mcp.json` file that would not parse. Its hooks and servers are entries inside it; with the file unread there is nothing to write a row about. |
 
 ## Statistics
 

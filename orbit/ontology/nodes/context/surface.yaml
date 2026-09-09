@@ -9,9 +9,9 @@
 
 node_type: Surface
 domain: context
-description: A file that can place text into an assistant session
+description: Something that can place text into an assistant session -- a file, or an entry inside one
 label: path
-default_columns: [id, path, surface_kind, size_bytes, commit_sha]
+default_columns: [id, path, name, surface_kind, size_bytes, commit_sha]
 destination_table: gl_context_surface
 sort_key: [traversal_path, project_id, branch, id]
 
@@ -71,12 +71,19 @@ properties:
     mutable: false
     description: "Relative path within the repository."
 
+  name:
+    type: string
+    source: name
+    nullable: true
+    mutable: false
+    description: "What the estate calls this surface -- a skill or agent frontmatter name, a slash command name, a hook event name, an MCP server name. NULL where the estate declares none."
+
   surface_kind:
     type: string
     source: surface_kind
     nullable: false
     mutable: false
-    description: "Kind of surface (e.g. instruction-surface, skill-package, agent-definition)."
+    description: "instruction-surface | skill-package | agent-definition | command-definition | hook-definition | mcp-config | hook-target."
     selectivity: low
 
   size_bytes:
@@ -84,7 +91,57 @@ properties:
     source: size_bytes
     nullable: false
     mutable: false
-    description: "Uncompressed file size in bytes, measured at index time."
+    description: "Bytes of the surface, measured at index time: the file size for a whole-file surface, the size of the entry for a surface that is an entry inside a file."
+
+  frontmatter_bytes:
+    type: int64
+    source: frontmatter_bytes
+    nullable: true
+    mutable: false
+    description: "Bytes of the leading frontmatter block, delimiters included. 0 where the surface has none; NULL where it was not read as text. Recorded apart from the body because a skill's frontmatter loads at boot for every session and its body only on invocation."
+
+  body_bytes:
+    type: int64
+    source: body_bytes
+    nullable: true
+    mutable: false
+    description: "Bytes after the frontmatter block. NULL where the surface was not read as text."
+
+  start_line:
+    type: int64
+    source: start_line
+    nullable: true
+    mutable: false
+    description: "First line of the entry within its file, 1-based. NULL where the surface is the whole file."
+
+  end_line:
+    type: int64
+    source: end_line
+    nullable: true
+    mutable: false
+    description: "Last line of the entry within its file. NULL where the surface is the whole file."
+
+  matcher:
+    type: string
+    source: matcher
+    nullable: true
+    mutable: false
+    description: "The hook's matcher, quoted verbatim from the settings file. NULL where the entry declares no matcher key; empty where it declares an empty one."
+
+  target_path:
+    type: string
+    source: target_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path a hook command resolves to. Empty where it does not resolve inside the tree; NULL for surfaces that are not hook definitions."
+
+  target_resolution:
+    type: string
+    source: target_resolution
+    nullable: true
+    mutable: false
+    description: "in-tree | path-lookup | no-indexed-target-match | unexpanded-variable | unparsable-command. NULL for surfaces that are not hook definitions."
+    selectivity: low
 
   content:
     type: string
@@ -114,8 +171,16 @@ storage:
     - {name: branch, type: "String", codec: ["ZSTD(1)"]}
     - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: surface_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+    - {name: frontmatter_bytes, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: body_bytes, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: start_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: end_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: matcher, type: "String", codec: ["ZSTD(1)"]}
+    - {name: target_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: target_resolution, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}

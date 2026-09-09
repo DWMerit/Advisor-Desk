@@ -49,10 +49,10 @@ class TestRowsLand(EstateTestCase):
         )
         self.assertGreater(len(rows), 0)
 
-    def test_both_repositories_are_indexed(self):
+    def test_every_repository_is_indexed(self):
         projects = self.query("SELECT DISTINCT project_id FROM gl_context_surface")
-        self.assertEqual(len(projects), 2)
-        self.assertEqual(self.stats["graph"]["repositories"], 2)
+        self.assertEqual(len(projects), 3)
+        self.assertEqual(self.stats["graph"]["repositories"], 3)
 
     def test_root_and_nested_surfaces(self):
         paths = {row[0] for row in self.query("SELECT path FROM gl_context_surface")}
@@ -82,8 +82,11 @@ class TestRowsLand(EstateTestCase):
         self.assertNotIn("src/takeoff.py", paths)
 
     def test_size_bytes_matches_the_file(self):
+        # Whole-file surfaces only: a hook definition carries the size of its
+        # entry, not of the settings file around it.
         for (path, size) in self.query(
-            "SELECT path, size_bytes FROM gl_context_surface WHERE project_id = ?",
+            "SELECT path, size_bytes FROM gl_context_surface "
+            "WHERE project_id = ? AND start_line IS NULL",
             [self.stats["repositories"][0]["project_id"]],
         ):
             on_disk = (Path(self.stats["repositories"][0]["path"]) / path).stat().st_size
