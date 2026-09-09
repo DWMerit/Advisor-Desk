@@ -1,8 +1,19 @@
 # Orbit Context
 
-A context domain that lives inside GitLab Orbit's own local DuckDB
-(`~/.orbit/graph.duckdb`). A Python indexer writes `gl_context_*` tables;
-**their** CLI queries them and joins them to **their** code graph.
+A context domain in its own DuckDB file (`~/.orbit-context/context.duckdb`),
+beside GitLab Orbit's. A Python indexer writes `gl_context_*` tables; Orbit's
+graph is ATTACHed **read-only** when a cross-domain join is wanted.
+
+**Why a separate file.** DuckDB takes an exclusive lock across processes, and
+it covers reads too: while one process holds a file for writing, no other
+process can open it at all. Writing into `~/.orbit/graph.duckdb` would shut
+`orbit sql`, `orbit index` and `orbit mcp` out for the length of every index
+run, and an open MCP session would shut the indexer out. Tested both ways;
+`tests/test_join.py` pins the behaviour.
+
+The cost, since it is a real one: the attach does not persist to a fresh
+connection, so a query spanning both graphs runs only from a connection that
+attaches. Orbit's CLI reads one file or the other.
 
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
 
@@ -17,11 +28,11 @@ orbit/bin/orbit-context index /home/user
 # Per-file skipped and errored detail as well as counts.
 orbit/bin/orbit-context index /home/user --stats
 
-# Somewhere other than ~/.orbit/graph.duckdb.
+# Somewhere other than ~/.orbit-context/context.duckdb.
 orbit/bin/orbit-context index /home/user --db /tmp/scratch.duckdb
 ```
 
-Then query it with Orbit's own CLI:
+Then query it with Orbit's own CLI, pointed at our file:
 
 ```sh
 orbit local sql "SELECT path, surface_kind, size_bytes FROM gl_context_surface
@@ -43,7 +54,7 @@ python3 -m unittest discover -s orbit/tests -t .
 
 They build a throwaway two-repository estate in a temp directory
 (`orbit/fixtures/build_estate.py`) and index it into a temp DuckDB. Nothing
-touches `~/.orbit/graph.duckdb`. The fixture is built by script, never
+touches `~/.orbit/graph.duckdb` or `~/.orbit-context/context.duckdb`. The fixture is built by script, never
 committed: a committed fixture would mean nested `.git` directories that every
 clone and tool then has to special-case.
 

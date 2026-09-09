@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_parser.add_argument("path", help="Path to the estate or repository to index")
     index_parser.add_argument(
         "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
-        help="Override the DuckDB path (default: ~/.orbit/graph.duckdb)",
+        help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
     )
     index_parser.add_argument(
         "--ontology", dest="ontology_root", default=None,

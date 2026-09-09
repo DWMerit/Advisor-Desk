@@ -1,7 +1,14 @@
-"""Write ``gl_context_*`` tables into Orbit's own DuckDB.
+"""Write ``gl_context_*`` tables into our own DuckDB, beside Orbit's.
 
-Never writes to Orbit's tables. The table shape comes from the ontology YAML,
-so adding a column there adds it here.
+Never opens Orbit's file for writing. DuckDB takes an exclusive lock across
+processes: while one process holds a file for writing, no other process can
+open it at all, not even read-only. Writing into ``~/.orbit/graph.duckdb``
+would lock out ``orbit sql``, ``orbit index`` and ``orbit mcp`` for the
+duration of every index run, and an open MCP session would lock out ours.
+
+So the context domain lives in its own file and Orbit's graph is ATTACHed
+read-only when a cross-domain join is wanted. The table shape comes from the
+ontology YAML, so adding a column there adds it here.
 """
 
 from __future__ import annotations
@@ -13,7 +20,10 @@ import duckdb
 
 from .ontology import NodeType
 
-DEFAULT_DB_PATH = Path(os.path.expanduser("~/.orbit/graph.duckdb"))
+DEFAULT_DB_PATH = Path(os.path.expanduser("~/.orbit-context/context.duckdb"))
+
+# Orbit's own graph. Only ever attached read-only, never opened for writing.
+ORBIT_GRAPH_PATH = Path(os.path.expanduser("~/.orbit/graph.duckdb"))
 
 # Orbit's own tables. Guarded so a mistake here fails loudly instead of
 # corrupting the code graph.
@@ -36,6 +46,21 @@ def connect(db_path: str | Path = DEFAULT_DB_PATH, read_only: bool = False):
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     return duckdb.connect(str(path), read_only=read_only)
+
+
+def attach_orbit(connection, graph_path: str | Path = ORBIT_GRAPH_PATH, alias: str = "orbit"):
+    """Attach Orbit's graph read-only so its tables can be joined.
+
+    Read-only is not a convenience here: attaching read-write would take the
+    exclusive lock and shut every Orbit command out. The attach lasts for this
+    connection only -- a fresh connection does not inherit it, so anything
+    needing the join does it itself.
+    """
+    path = Path(graph_path)
+    if not path.exists():
+        raise StoreError(f"Orbit graph not found at {path}; run `orbit index` first")
+    connection.execute(f"ATTACH '{path}' AS {alias} (READ_ONLY)")
+    return alias
 
 
 def existing_columns(connection, table: str) -> list[str]:
