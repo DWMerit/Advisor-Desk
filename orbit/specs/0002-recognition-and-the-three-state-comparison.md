@@ -90,6 +90,14 @@ Skills from Programming Books* by Maciej Ciemborowicz.
 authored by Ciemborowicz. So C0 needs no attached remote and no network. C1 and C0 differ
 by exactly the 19 commits of this project.
 
+The comparison depends on one further property, also verified: **C1 did not rewrite C0.**
+`git diff main..HEAD` outside `orbit/` is two lines of `.gitignore` (`__pycache__/`,
+`*.pyc`). All 198 markdown rule files are byte-identical at both ends, and HEAD carries 201
+non-`orbit/` files against main's 201. C1 is therefore C0 plus additions, and `C1 − C0`
+measures what a session *added* against an unmoved base. Whether the same holds for C2 is
+not known and is the first thing the acceptance run establishes: if C2 rewrote its base,
+the two deltas are not the same kind of measurement and the comparison has to say so.
+
 Identical starting bytes, three end states, one variable each. The deltas `C1 − C0` and
 `C2 − C0` are directly comparable in a way that no single absolute figure is. This is a
 stronger falsifier than spec 0001 §9's cold-start number, which remains phase 2 and still
