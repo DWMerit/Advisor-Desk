@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +41,28 @@ class RepoResult:
     errored: list[dict] = field(default_factory=list)
 
 
+_DIGESTS: dict[tuple, str] = {}
+
+
+def _digest(path) -> str:
+    """SHA-256 of a file, memoised on (path, mtime, size) within a run.
+
+    One file can produce many surface rows -- a settings file holds a row per
+    hook -- so this is cached rather than re-read per row.
+    """
+    try:
+        stat = path.stat()
+    except OSError:
+        return ""
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key not in _DIGESTS:
+        try:
+            _DIGESTS[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            _DIGESTS[key] = ""
+    return _DIGESTS[key]
+
+
 def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
     # A settings file holds many rows at one path, so the path alone no longer
     # identifies a surface. Kind and offset complete it -- the offset rather
@@ -57,6 +81,7 @@ def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
         "path": detected.relative_path,
         "name": detected.name,
         "surface_kind": detected.kind,
+        "content_sha256": _digest(repo.root / detected.relative_path),
         "size_bytes": detected.size_bytes,
         "frontmatter_bytes": detected.frontmatter_bytes,
         "body_bytes": detected.body_bytes,

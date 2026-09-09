@@ -16,11 +16,29 @@ This is the whole reason for emulating their `Definition` model. A 17 KB instruc
 
 ## Acceptance
 
-- [ ] A rule buried three headings deep is retrievable by `fqn`
-- [ ] Retrieved text is byte-identical to that span of the file on disk
-- [ ] Editing the file and re-indexing moves the offsets
-- [ ] No clause text is stored in any column
-- [ ] Nesting depth is queryable via `CONTAINS`
+- [x] A rule buried three headings deep is retrievable by `fqn`
+- [x] Retrieved text is byte-identical to that span of the file on disk
+- [x] Editing the file and re-indexing moves the offsets
+- [x] No clause text is stored in any column
+- [x] Nesting depth is queryable via `CONTAINS`
+
+Three contracts were added after the first implementation, because ticket 04
+resolves pointers **to** these addresses — at which point an ambiguous address
+becomes a wrong edge, and a stale offset becomes a wrong edge that also looks
+right. Each is now pinned by test:
+
+- [x] An `fqn` matching more than one clause fails as `AMBIGUOUS` (exit 2),
+      writes **nothing** to stdout, and lists candidates by `id`
+- [x] A clause `id` resolves to exactly one clause; `fqn` is a lookup key, `id`
+      is the address — the split GitLab makes between `Definition.fqn` and
+      `Definition.id`
+- [x] Reading a file that changed since indexing fails as `STALE` (exit 3), not
+      a slice at offsets that no longer describe it — caught by SHA-256, so a
+      same-length edit is caught too
+- [x] A parent's span **includes** its descendants, documented and tested,
+      matching GitLab where a class definition spans its methods
+- [x] `show --own` returns a clause's own bytes with descendant spans removed,
+      for a bounded load rather than a whole subtree
 
 ## Watch for
 

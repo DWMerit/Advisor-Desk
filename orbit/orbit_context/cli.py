@@ -48,12 +48,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print one clause's bytes, read from the file at its recorded offsets",
     )
     show_parser.add_argument(
-        "fqn", help="The clause address, e.g. 'CLAUDE.md#Estimating rules#M6 anchors'",
+        "fqn", help="The clause address: an fqn, e.g. "
+                    "'CLAUDE.md#Estimating rules#M6 anchors', or a clause id",
     )
     show_parser.add_argument(
         "--repo", dest="repo", default=".",
         help="A path inside the repository the clause belongs to (default: the "
              "working directory). Its git state selects the snapshot to read.",
+    )
+    show_parser.add_argument(
+        "--own", action="store_true",
+        help="Print only this clause's own bytes, with descendant clauses "
+             "removed. A parent's span includes everything nested under it, so "
+             "without this a heading returns its whole subtree.",
     )
     show_parser.add_argument(
         "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
@@ -88,18 +95,36 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "show":
         try:
-            found = retrieve.clauses(args.fqn, repo=args.repo, db_path=args.db_path)
+            clause = retrieve.resolve(args.fqn, repo=args.repo, db_path=args.db_path)
+        except retrieve.AmbiguousAddress as error:
+            # Nothing on stdout. A caller redirecting stdout to a file must get
+            # one clause's bytes or no bytes -- never two spans concatenated.
+            print(f"orbit-context: AMBIGUOUS: {error}", file=sys.stderr)
+            for candidate in error.candidates:
+                print(f"  {candidate.locator}", file=sys.stderr)
+            return 2
+        except retrieve.StaleIndex as error:
+            print(f"orbit-context: STALE: {error}", file=sys.stderr)
+            return 3
         except (StoreError, GitError, retrieve.RetrievalError) as error:
             print(f"orbit-context: {error}", file=sys.stderr)
             return 1
-        if not found:
-            print(f"orbit-context: no clause at {args.fqn!r}", file=sys.stderr)
+        try:
+            if args.own:
+                inner = retrieve.descendants(clause, repo=args.repo, db_path=args.db_path)
+                body = clause.read_own(inner)
+            else:
+                body = clause.read()
+        except retrieve.StaleIndex as error:
+            print(f"orbit-context: STALE: {error}", file=sys.stderr)
+            return 3
+        except retrieve.RetrievalError as error:
+            print(f"orbit-context: {error}", file=sys.stderr)
             return 1
-        for clause in found:
-            # The locator on stderr, the bytes on stdout: redirecting stdout to
-            # a file must produce the span of the file, and nothing else.
-            print(f"orbit-context: {clause.locator}", file=sys.stderr)
-            sys.stdout.buffer.write(clause.read())
+        # The locator on stderr, the bytes on stdout: redirecting stdout to a
+        # file must produce the span of the file, and nothing else.
+        print(f"orbit-context: {clause.locator}", file=sys.stderr)
+        sys.stdout.buffer.write(body)
         sys.stdout.buffer.flush()
         return 0
     return 1

@@ -35,7 +35,8 @@ class TestSurfaceYaml(unittest.TestCase):
         self.assertEqual(
             self.node.column_names,
             ("id", "traversal_path", "project_id", "branch", "commit_sha",
-             "path", "name", "surface_kind", "size_bytes", "frontmatter_bytes",
+             "path", "name", "surface_kind", "content_sha256", "size_bytes",
+             "frontmatter_bytes",
              "body_bytes", "start_line", "end_line", "matcher", "target_path",
              "target_resolution", "reason"),
         )

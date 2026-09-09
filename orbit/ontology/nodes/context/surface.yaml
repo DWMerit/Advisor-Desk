@@ -86,6 +86,16 @@ properties:
     description: "instruction-surface | skill-package | agent-definition | command-definition | hook-definition | mcp-config | hook-target."
     selectivity: low
 
+  content_sha256:
+    type: string
+    source: content_sha256
+    nullable: false
+    mutable: false
+    description: "SHA-256 of the file's bytes as indexed. Retrieval compares the
+      file against this before slicing: byte offsets recorded against one
+      version of a file are meaningless against another, and returning whatever
+      now sits at those offsets is silently wrong rather than merely stale."
+
   size_bytes:
     type: int64
     source: size_bytes
@@ -173,6 +183,7 @@ storage:
     - {name: path, type: "String", codec: ["ZSTD(3)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: surface_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: content_sha256, type: "String", codec: ["ZSTD(1)"]}
     - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: frontmatter_bytes, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: body_bytes, type: "Int64", codec: ["T64", "ZSTD(1)"]}
