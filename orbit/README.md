@@ -1128,9 +1128,47 @@ governance, added outside `orbit/`. Both runs are correct and they answer
 different questions; the pinned one is the falsifier, because its expected
 values were written down before it was run.
 
+### The three-state run
+
+Ticket 14, the same detector set, one of the three states in another repository:
+
+```
+orbit-context compare a7d7649 dc16a3e /home/user/agent-rules-books@782a886 --repo .
+
+COUNTS  every state's own figures beside every delta  [1.8eabab386316]
+  state                              a7d7649  dc16a3e  agent-r…@782a886   Δ C1    Δ C2
+  files walked                           201      323               515   +122    +314
+  bytes walked                       2172106  3239053          10432071      …       …
+  surfaces                                87      103               126    +16     +39
+  names that resolve to another name      14       14                14      0       0
+  two names for one file, folded          14       14                14      0       0
+  surface bytes                       781674   853575            946722 +71901 +165048
+```
+
+Three readings of that table, and each is in the ticket with the figures it
+rests on:
+
+- **C2 still holds the fourteen links.** The same fourteen paths naming the same
+  fourteen targets, 812 bytes, in every state — so nothing resolved them, and
+  the base is intact in the respect that would have made the two deltas
+  different kinds of measurement. The fold reports fourteen either way; the link
+  count is what says which fourteen they are.
+- **The deltas tie back to named files.** C1's +16 is sixteen
+  `.claude/skills/<name>/SKILL.md`. C2's +39 is 42 rows C0 does not carry, less
+  three of C0's that C2 does not.
+- **Those three did not go anywhere.** `_rule-workbench/CHECK_COMPATIBILITY.md`,
+  `PROCESS.md` and `RELEASE.md` are present in C2 and byte-identical to C0's.
+  C2 added one undeclared file per book to that subtree, which took it from 42
+  declared of 45 to 42 of 59 — under the corpus rule's 0.75 — so the directory
+  is a corpus in one state and not in the other. A count that moved because a
+  share moved is not a count of files anyone removed, and the ticket says so
+  beside the number.
+
 This is evidence, not a test. `orbit/tests/test_compare.py` asserts against
-`build_states`, a fixture repository committed at three states, because a test
-that reads live repository content fails whenever that content changes —
+`build_states`, a fixture repository committed at three states — and against a
+second copy of it standing for a clone that went its own way, in both the shape
+that kept its links and the shape whose links were resolved — because a test
+that reads live repository content fails whenever that content changes,
 including from this work.
 
 ## Statistics
