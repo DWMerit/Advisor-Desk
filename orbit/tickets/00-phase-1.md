@@ -4,12 +4,18 @@ Spec: `orbit/specs/0001-observation-foundation.md`
 
 Seven tickets. Tickets 01–06 are done.
 
-**07 does not run yet.** Running the indexer against this repository returned
-**0 surfaces from 238 files walked** — recognition is by vendor filename, so a
-repository that is entirely governance matches none of it. An estate audit on that
-indexer returns honest zeros and teaches nothing. Spec 0002 and tickets 09–14
-(`08-recognition-and-comparison.md`) close the gap; ticket 14 re-scopes 07 and hands
-it back runnable. **The frontier is 09.**
+**07 did not run**, and the reason has since been closed. Running the indexer
+against this repository returned **0 surfaces from 238 files walked** —
+recognition was by vendor filename, so a repository that is entirely governance
+matched none of it. An estate audit on that indexer returns honest zeros and
+teaches nothing. Spec 0002 and tickets 09–14 (`08-recognition-and-comparison.md`)
+close the gap; ticket 14 re-scopes 07 and hands it back runnable.
+
+**Tickets 09, 10 and 11 are done.** The same repository now returns **87 surfaces
+from 252 files walked**, reconciled file by file against the hand count in `08`,
+and its fourteen three-rung ladders are a first-class edge that can be asked for
+by book. Recognition is no longer what blocks 07; tickets 12–14 are.
+**The frontier is 12**, tracked in `08-recognition-and-comparison.md`.
 
 | # | Ticket | Blocked by |
 |---|---|---|

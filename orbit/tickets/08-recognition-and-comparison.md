@@ -5,14 +5,19 @@ Spec: `orbit/specs/0002-recognition-and-the-three-state-comparison.md`
 Six tickets. Work top to bottom; each is blocked by the one before it, because
 each measures something the previous one made measurable.
 
-| # | Ticket | Blocked by |
-|---|---|---|
-| 09 | The store holds only what this run put there | — |
-| 10 | A rule file is a surface | 09 |
-| 11 | The ladder is queryable | 10 |
-| 12 | Workbench to published carries a direction where evidence allows | 11 |
-| 13 | Two states compare | 12 |
-| 14 | Three states, and ticket 07 re-scoped | 13 |
+**Three are done. The frontier is 12.**
+
+| # | Ticket | Blocked by | State |
+|---|---|---|---|
+| 09 | The store holds only what this run put there | — | done |
+| 10 | A rule file is a surface | 09 | done |
+| 11 | The ladder is queryable | 10 | done |
+| 12 | Workbench to published carries a direction where evidence allows | 11 | **frontier** |
+| 13 | Two states compare | 12 | |
+| 14 | Three states, and ticket 07 re-scoped | 13 | |
+
+Each closed ticket carries its own acceptance run as evidence, hand-checked and
+never asserted in a test.
 
 **Prefactoring: ticket 09.** The store carries four columns the ontology no
 longer declares and holds a prior index of another repository. Every count taken
@@ -58,9 +63,13 @@ than counting again: published rule files were written down as 43 and are 42 —
 14 books at three rungs — and `CHANGELOG.md` was missing from the root group.
 42 + 45 + 95 + 5 + 14 = 201, the total this ticket already states.
 
+The 42 was then reached a second way by ticket 11, which found the same files as
+**14 ladders of 3 rungs** off their filenames rather than off their contents. Two
+routes to one figure is what makes it a reconciliation rather than a count.
+
 Byte-identical pairs found by phase 1: **28**, with provenance: **0**.
 One ladder, for reference: `refactoring.md` 17,866 / `.mini.md` 5,167 /
-`.nano.md` 1,986 bytes.
+`.nano.md` 1,986 bytes — the three ticket 11 printed back, byte for byte.
 
 A count that cannot be tied back to these named groups is not a result.
 
