@@ -129,6 +129,12 @@ class RepoMap:
     # row carries. Read through `pairs.from_graph`, so the map and the `pairs`
     # command answer the same question once rather than twice -- and the counts
     # the map prints are derived from the same rows the listing comes from.
+    # Counted in the database and listed under a cap, both from `pairs`: a map
+    # that prints five example pairs must not fetch every pair to count them,
+    # because pairing is quadratic inside a hash group. One owner for both
+    # statements, so the map and the `pairs` command cannot come apart on a
+    # number they both print.
+    pair_counts: pairs.PairCounts = field(default_factory=pairs.PairCounts)
     pairings: list[pairs.Pairing] = field(default_factory=list)
     produces_by_evidence: dict[str, int] = field(default_factory=dict)
     # The ladders this snapshot holds, and the rung words that reach none of
@@ -145,25 +151,15 @@ class RepoMap:
 
     @property
     def identical_pairs(self) -> int:
-        return len(self.pairings)
+        return self.pair_counts.total
 
     @property
     def pairs_with_provenance(self) -> int:
-        """Ticket 05's count, read off the rows rather than asked for again.
-
-        A pair carries provenance where a producer reaches either end, which is
-        exactly a pair whose direction reason is not "no producer named at
-        either end". Derived so this map and the `pairs` command cannot come
-        apart on a number they both print.
-        """
-        return sum(
-            1 for one in self.pairings
-            if one.reason != provenance.NO_PRODUCER_AT_EITHER_END
-        )
+        return self.pair_counts.with_provenance
 
     @property
     def pairs_with_a_direction(self) -> int:
-        return sum(1 for one in self.pairings if one.ordered)
+        return self.pair_counts.with_a_direction
 
     @property
     def inferred_recognitions(self) -> int:
@@ -244,7 +240,14 @@ def read(repo: str | Path = ".", db_path: str | Path = store.DEFAULT_DB_PATH,
             (reason, int(count), int(errored))
             for reason, count, errored in _scoped(connection, _COVERAGE_SQL, snapshot)
         ]
-        _read_graph(connection, snapshot, result)
+        try:
+            _read_graph(connection, snapshot, result)
+        except pairs.PairsError as error:
+            # A store whose columns predate this build. `pairs` already names
+            # the command that resolves it; the map raises its own error type
+            # so the command line handles it the way it handles every other
+            # thing a map cannot read.
+            raise RepoMapError(str(error)) from None
     finally:
         connection.close()
 
@@ -300,7 +303,12 @@ def _read_graph(connection, snapshot: list, result: RepoMap) -> None:
     for sub_kind, count in _scoped(connection, _EXTERNAL_SQL, snapshot):
         result.external_refs_by_sub_kind[sub_kind] = int(count)
 
-    result.pairings = pairs.from_graph(connection, snapshot)
+    result.pair_counts = pairs.counts_from_graph(
+        connection, snapshot, db_path=result.database_path
+    )
+    result.pairings = pairs.from_graph(
+        connection, snapshot, limit=EXAMPLE_ROWS, db_path=result.database_path
+    )
 
     result.produces_by_evidence = {rung: 0 for rung in provenance.EVIDENCE_LADDER}
     for rung, count in _scoped(connection, _PRODUCES_SQL, snapshot):
@@ -557,8 +565,9 @@ def _identical(result: RepoMap, examples: bool) -> list[str]:
     its budget once.
     """
     lines = pairs.summary_lines(
-        result.pairings, result.graph_detector_version,
-        limit=EXAMPLE_ROWS if examples else 0,
+        result.pair_counts,
+        result.pairings if examples else [],
+        result.graph_detector_version,
         shorten=lambda path: _short(path, 44),
     )
     lines += _rows(list(result.produces_by_evidence.items()), indent="  PRODUCES ")

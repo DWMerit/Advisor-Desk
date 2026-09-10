@@ -31,15 +31,32 @@ separation: those pairs *have* provenance -- ticket 05's count sees them -- and
 still nothing that orders them, so counting them with the pairs no evidence
 reaches would be untrue about both.
 
+And a fourth state, which is not a reason
+-----------------------------------------
+
+A row written before the direction existed carries NULL in these columns. That
+is not UNKNOWN: UNKNOWN is a measurement, and this is the absence of one. It is
+counted under :data:`NOT_MEASURED` and left out of both provenance counts, so a
+snapshot from an older detector set cannot read as an estate where every pair
+turned out to have a producer. The header's detector-version banner says the
+same thing in prose; this is the number saying it.
+
 Everything comes from the graph
 -------------------------------
 
 Nothing here re-walks the tree, on ``repo-map``'s argument: a second walk at
 query time is a second answer to "what is in this repository", taken against a
 tree that has moved on since indexing. One snapshot, one
-``(project_id, branch, commit_sha)``, every figure from a row -- and
-:func:`from_graph` is shared with ``repo-map`` so the map and this command
-answer the question once rather than twice.
+``(project_id, branch, commit_sha)``, every figure from a row.
+
+The counts come from a ``GROUP BY`` and the listing from an ``ORDER BY ... LIMIT``,
+both defined here, because a caller printing five example pairs must not have to
+fetch every pair to count them -- pairing is quadratic inside a hash group, so a
+repository with five hundred identical files holds a hundred and twenty-four
+thousand pairs and ``repo-map`` still prints five. Two statements, one owner:
+what ticket 11 refuses is two *derivations* of one number living in two modules,
+which is how a map and a command end up disagreeing with no way to tell which is
+right.
 """
 
 from __future__ import annotations
@@ -51,6 +68,11 @@ import duckdb
 
 from . import detectors, provenance, store
 from .retrieve import repository
+
+# A pair whose row predates the direction. Not a reason -- the run did not
+# measure one -- so it is named apart from the three reasons a run *did* measure
+# and found nothing to order the pair with.
+NOT_MEASURED = "not-measured"
 
 # What a direction is read off, printed with the count at every value including
 # zero. A pair is ordered by a PRODUCES edge between its own two ends and by
@@ -68,9 +90,17 @@ DIRECTION_RULE_CAVEAT = (
     "  something observed."
 )
 
+# Said where a snapshot holds rows from before the direction existed, and only
+# there. A store in that state is resolved by a command, so the command is
+# named rather than left to be worked out.
+NOT_MEASURED_REMEDY = (
+    "written by a run that recorded no direction. Re-index the repository to "
+    "measure them."
+)
+
 
 class PairsError(Exception):
-    """The graph holds no snapshot to read pairs from."""
+    """The graph holds no snapshot to read pairs from, or holds an older one."""
 
 
 @dataclass(frozen=True)
@@ -87,8 +117,12 @@ class Pairing:
     evidence_line: int | None = None
 
     @property
+    def measured(self) -> bool:
+        return self.direction != NOT_MEASURED
+
+    @property
     def ordered(self) -> bool:
-        return self.direction != provenance.DIRECTION_UNKNOWN
+        return self.direction in provenance.DIRECTIONS
 
     @property
     def producer_path(self) -> str | None:
@@ -116,6 +150,77 @@ class Pairing:
 
 
 @dataclass
+class PairCounts:
+    """How one snapshot's pairs divide, however they were counted.
+
+    Built either from a list of :class:`Pairing` or from a ``GROUP BY``, so a
+    caller that needs the numbers without the rows gets the same arithmetic.
+    Every reason and every rung is present at zero; a value this build does not
+    know is added rather than dropped, because it was read off a row and a
+    vocabulary this build has not seen is a finding rather than a crash.
+    """
+
+    total: int = 0
+    with_a_direction: int = 0
+    not_measured: int = 0
+    by_reason: dict[str, int] = field(
+        default_factory=lambda: {
+            reason: 0 for reason in provenance.DIRECTION_UNKNOWN_REASONS
+        }
+    )
+    by_direction_evidence: dict[str, int] = field(
+        default_factory=lambda: {rung: 0 for rung in provenance.EVIDENCE_LADDER}
+    )
+
+    @property
+    def with_provenance(self) -> int:
+        """Ticket 05's count: a pair a producer reaches at either end.
+
+        Stated positively -- ordered pairs, plus the pairs whose reason names a
+        producer somewhere -- rather than as "everything but one reason". A row
+        that carries no reason at all is not a pair with provenance, and
+        negative logic would count it as one.
+        """
+        return self.with_a_direction + sum(
+            count for reason, count in self.by_reason.items()
+            if reason != provenance.NO_PRODUCER_AT_EITHER_END
+        )
+
+    @property
+    def without_provenance(self) -> int:
+        return self.by_reason.get(provenance.NO_PRODUCER_AT_EITHER_END, 0)
+
+    def add(self, direction: str | None, reason: str | None,
+            evidence: str | None, count: int = 1) -> None:
+        """Tally one row, or ``count`` rows that share these three values."""
+        self.total += count
+        if direction is None:
+            self.not_measured += count
+            return
+        if direction in provenance.DIRECTIONS:
+            self.with_a_direction += count
+            if evidence is not None:
+                self.by_direction_evidence[evidence] = (
+                    self.by_direction_evidence.get(evidence, 0) + count
+                )
+            return
+        # UNKNOWN, or a direction value this build has not seen. Either way the
+        # reason is what the row has to say about it.
+        key = reason if reason is not None else NOT_MEASURED
+        self.by_reason[key] = self.by_reason.get(key, 0) + count
+
+    @classmethod
+    def of(cls, found: list[Pairing]) -> PairCounts:
+        counts = cls()
+        for one in found:
+            counts.add(
+                None if not one.measured else one.direction,
+                one.reason, one.evidence,
+            )
+        return counts
+
+
+@dataclass
 class PairReading:
     """Every byte-identical pair in one snapshot, with its direction."""
 
@@ -127,40 +232,7 @@ class PairReading:
     graph_detector_version: str = ""
     build_detector_version: str = detectors.VERSION
     pairs: list[Pairing] = field(default_factory=list)
-
-    @property
-    def with_a_direction(self) -> int:
-        return sum(1 for one in self.pairs if one.ordered)
-
-    @property
-    def with_provenance(self) -> int:
-        """Ticket 05's count, derived from the reasons rather than re-asked.
-
-        A pair carries provenance where a producer reaches either end, which is
-        exactly a pair whose reason is not "no producer named at either end".
-        Derived here so the map, this command and the index statistics cannot
-        come apart on it.
-        """
-        return len(self.pairs) - sum(
-            1 for one in self.pairs
-            if one.reason == provenance.NO_PRODUCER_AT_EITHER_END
-        )
-
-    @property
-    def by_reason(self) -> dict[str, int]:
-        counts = {reason: 0 for reason in provenance.DIRECTION_UNKNOWN_REASONS}
-        for one in self.pairs:
-            if one.reason is not None:
-                counts[one.reason] += 1
-        return counts
-
-    @property
-    def by_direction_evidence(self) -> dict[str, int]:
-        counts = {rung: 0 for rung in provenance.EVIDENCE_LADDER}
-        for one in self.pairs:
-            if one.ordered and one.evidence is not None:
-                counts[one.evidence] += 1
-        return counts
+    counts: PairCounts = field(default_factory=PairCounts)
 
     @property
     def detectors_agree(self) -> bool:
@@ -177,29 +249,79 @@ _SNAPSHOT = _snapshot()
 
 _RUN_SQL = f"SELECT detector_set_version FROM gl_context_run WHERE {_SNAPSHOT}"
 
+_WHERE = (
+    f"WHERE relationship_kind = '{provenance.IDENTICAL_BYTES_EDGE}' AND {_SNAPSHOT}"
+)
+
+_COUNTS_SQL = (
+    "SELECT direction, direction_reason, subtype, count(*) "
+    f"FROM gl_context_edge {_WHERE} GROUP BY 1, 2, 3"
+)
+
 _PAIRS_SQL = (
     "SELECT source_path, target_path, content_sha256, direction, "
     "direction_reason, subtype, evidence_path, evidence_line "
-    "FROM gl_context_edge "
-    f"WHERE relationship_kind = '{provenance.IDENTICAL_BYTES_EDGE}' "
-    f"AND {_SNAPSHOT} ORDER BY source_path, target_path"
+    f"FROM gl_context_edge {_WHERE} ORDER BY source_path, target_path"
 )
 
 
-def from_graph(connection, snapshot: list) -> list[Pairing]:
+def _query(connection, sql: str, parameters: list, db_path) -> list[tuple]:
+    """Run one query, and name the remedy where the store predates the columns.
+
+    A store written before this ticket has no ``direction`` column, and DuckDB
+    answers a select on it with a binder error rather than a missing table. Left
+    to itself that reaches the command line as a traceback; the store already
+    has a command that resolves it, so it is named here the way every other
+    schema mismatch in this tool names it.
+    """
+    try:
+        return connection.execute(sql, parameters).fetchall()
+    except duckdb.Error as error:
+        where = f" at {db_path}" if db_path else ""
+        raise PairsError(
+            f"the context graph{where} does not carry the columns this build "
+            f"reads byte-identical pairs from ({error}). To bring the store to "
+            f"the ontology, run `orbit-context migrate"
+            + (f" --db {db_path}" if db_path else "")
+            + "`, then re-index the repository."
+        ) from None
+
+
+def counts_from_graph(connection, snapshot: list, db_path=None) -> PairCounts:
+    """How one snapshot's pairs divide, without fetching one row per pair.
+
+    ``repo-map`` prints five example pairs and the counts over all of them, and
+    pairing is quadratic inside a hash group -- so the counts are aggregated in
+    the database rather than by reading every row back.
+    """
+    counts = PairCounts()
+    for direction, reason, evidence, total in _query(
+        connection, _COUNTS_SQL, snapshot, db_path
+    ):
+        counts.add(direction, reason, evidence, int(total))
+    return counts
+
+
+def from_graph(connection, snapshot: list, limit: int | None = None,
+               db_path=None) -> list[Pairing]:
     """One snapshot's pairs, in path order, as the rows hold them.
 
     Takes an open connection rather than a path so that a caller already reading
     the graph -- ``repo-map`` -- gets the same answer this module's own command
-    does. Two queries for one question is how a map and a command end up
-    disagreeing about a count with no way to tell which is right.
+    does. ``limit`` caps the rows fetched, for a caller that only lists a few.
     """
+    sql = _PAIRS_SQL + (" LIMIT ?" if limit is not None else "")
+    parameters = snapshot + ([limit] if limit is not None else [])
     return [
         Pairing(
             source_path=source,
             target_path=target,
             content_sha256=sha256 or "",
-            direction=direction or provenance.DIRECTION_UNKNOWN,
+            # A NULL direction is a row written before the direction existed.
+            # It is not UNKNOWN: UNKNOWN is a measurement and this is the
+            # absence of one, and reading the first as the second would let an
+            # older snapshot report an order nobody looked for.
+            direction=direction if direction is not None else NOT_MEASURED,
             reason=reason,
             evidence=evidence,
             evidence_path=evidence_path,
@@ -207,7 +329,7 @@ def from_graph(connection, snapshot: list) -> list[Pairing]:
         )
         for (source, target, sha256, direction, reason, evidence,
              evidence_path, evidence_line)
-        in connection.execute(_PAIRS_SQL, snapshot).fetchall()
+        in _query(connection, sql, parameters, db_path)
     ]
 
 
@@ -248,49 +370,59 @@ def read(repo: str | Path = ".",
                 f"on {found.branch}; run `orbit-context index` first"
             )
         result.graph_detector_version = run[0][0]
-        result.pairs = from_graph(connection, snapshot)
+        result.pairs = from_graph(connection, snapshot, db_path=db_path)
+        result.counts = PairCounts.of(result.pairs)
     finally:
         connection.close()
     return result
 
 
-def summary_lines(found: list[Pairing], version: str, limit: int | None = None,
-                  shorten=None) -> list[str]:
+def summary_lines(counts: PairCounts, listed: list[Pairing],
+                  version: str, shorten=None) -> list[str]:
     """The IDENTICAL BYTES block, shared with ``repo-map``.
 
-    ``limit`` caps the pairs listed, for a caller printing inside a budget, and
-    ``0`` drops the listing entirely. The counts above them are never capped:
-    what is dropped is the listing, and the line saying how many were dropped is
-    part of the block rather than the caller's to remember.
+    ``counts`` covers every pair in the snapshot; ``listed`` is the ones this
+    caller has room to print, which may be none of them. The counts are never
+    capped -- what is dropped is the listing, and the line saying how many were
+    dropped is part of the block rather than the caller's to remember.
 
     ``shorten`` cuts a path to a printable width for the same caller.
     """
-    reading = PairReading("", "", "", "", "", graph_detector_version=version,
-                          pairs=found)
     lines = [
-        f"\nIDENTICAL BYTES  {len(found)} pairs  [{version}]",
-        f"  carrying provenance evidence     {reading.with_provenance}",
-        f"  carrying no provenance evidence  {len(found) - reading.with_provenance}",
-        f"  carrying a direction             {reading.with_a_direction}",
+        f"\nIDENTICAL BYTES  {counts.total} pairs  [{version}]",
+        f"  carrying provenance evidence     {counts.with_provenance}",
+        f"  carrying no provenance evidence  {counts.without_provenance}",
+        f"  carrying a direction             {counts.with_a_direction}",
+    ]
+    if counts.not_measured:
+        # Named only where there are any, and never folded into either count
+        # above: these rows say nothing about provenance, and a total that
+        # absorbed them would say something about it on their behalf.
+        lines.append(
+            f"  no direction recorded            {counts.not_measured}  "
+            f"-- {NOT_MEASURED_REMEDY}"
+        )
+    lines += [
         f"  read off  {DIRECTION_RULE}",
         f"  {DIRECTION_RULE_CAVEAT}",
         "  by evidence rung",
     ]
     lines += [f"    {rung}  {count}"
-              for rung, count in reading.by_direction_evidence.items()]
+              for rung, count in counts.by_direction_evidence.items()]
     lines.append("  carrying no direction, by reason")
     lines += [f"    {reason}  {count}"
-              for reason, count in reading.by_reason.items()]
+              for reason, count in counts.by_reason.items()]
 
-    listed = found if limit is None else found[:limit]
-    if listed:
+    if counts.total:
         # Headed, because the reason rows above it are indented the same and a
-        # reader scanning down would otherwise read the first pair as a fourth
-        # reason.
+        # reader scanning down would otherwise read the first pair -- or the
+        # line saying none were listed -- as a fourth reason.
         lines.append("  pair by pair")
     lines += [f"    {_line(one, shorten)}" for one in listed]
-    if len(listed) < len(found):
-        lines.append(f"    {len(found) - len(listed)} more pairs not listed")
+    dropped = counts.total - len(listed)
+    if dropped > 0:
+        more = "more " if listed else ""
+        lines.append(f"    {dropped} {more}pairs not listed")
     return lines
 
 
@@ -303,6 +435,8 @@ def _line(one: Pairing, shorten=None) -> str:
     """
     cut = shorten or (lambda path: path)
     pair = f"{cut(one.source_path)} = {cut(one.target_path)}"
+    if not one.measured:
+        return f"{pair}  {NOT_MEASURED}"
     if not one.ordered:
         return f"{pair}  {one.direction}: {one.reason}"
     return (f"{pair}  {cut(one.producer_path)} produces "
@@ -329,7 +463,8 @@ def render(reading: PairReading) -> str:
             "  Every count below is what that detector set found, not what this "
             "one would."
         )
-    lines += summary_lines(reading.pairs, reading.graph_detector_version)
+    lines += summary_lines(reading.counts, reading.pairs,
+                           reading.graph_detector_version)
     return "\n".join(lines) + "\n"
 
 

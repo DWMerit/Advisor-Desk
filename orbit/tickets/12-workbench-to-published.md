@@ -162,16 +162,14 @@ repository has it. A reason that only ever reads zero on every estate anyone has
 looked at is worth re-opening at ticket 07; this one is not, and the fixture says
 so.
 
-**`repo-map` now holds every pair in memory to print five of them.** It used to
-ask DuckDB for two counts and five example rows; it now reads every
-`IDENTICAL_BYTES` row through `pairs.from_graph`, because the counts and the
-listing have to come off the same rows or the map and the `pairs` command can
-disagree. That is the same trade `ladders.from_graph` already makes, and the
-output stays bounded either way, but the *input* no longer is: pairing is
-quadratic within a hash group, so a repository with a hundred identical files
-would materialise 4,950 rows to print five. Nothing in the estate is near that —
-28 here, and zero-byte files, the one shape that blows up, are already left out
-of the pairing. Re-open it on a measurement rather than on the shape.
+**`ladders.from_graph` has the unbounded fetch this ticket's review caught here.**
+`repo-map` briefly read every `IDENTICAL_BYTES` row to print five of them, on the
+reasoning that the counts and the listing must come off the same rows. That is
+fixed — the counts come from a `GROUP BY` and the listing from a `LIMIT`, both
+owned by `pairs`, which keeps one owner without one fetch. `ladders.from_graph`
+still fetches every `RUNG_OF` edge for a block that prints one row per ladder
+height, which is bounded by the estate rather than by construction. Left alone:
+it is ticket 11's code and fixing it here would put two tickets in one diff.
 
 **The direction is written at index time, not derived at read time.** It could
 have been a join between `IDENTICAL_BYTES` and `PRODUCES` rows at query time.
@@ -179,6 +177,23 @@ Writing it means the row carries the answer the run computed, on the same
 argument `repo-map` makes for not re-walking the tree — but it also means a
 snapshot written by an older detector set carries that set's answer, which is
 what the version in every header is for.
+
+**Five defects came out of `code-review` and are fixed and pinned by tests.**
+Four of them were one mistake in two shapes: the read seam assumed the new
+columns exist and are filled. On a snapshot written before this ticket they are
+NULL, and `pairs_with_provenance` — stated as "every reason but one" — counted
+all of them as carrying provenance, which is a false assertion and spec 0002 §9
+calls that a stop rather than a bug. A NULL is now `not-measured`, named apart
+from the three reasons and left out of both provenance counts, because UNKNOWN
+is a measurement and this is the absence of one. On a store with no `direction`
+column at all, `pairs` and `repo-map` answered with a raw DuckDB error; they now
+name `orbit-context migrate`, the way `index` already does. With the listing
+dropped for budget, the "N pairs not listed" line printed at the reasons'
+indent with no heading above it — the exact misreading the heading exists to
+prevent. And the two tallies indexed pre-seeded dicts with no membership check,
+so a reason or rung written by another detector set would have surfaced as a
+`KeyError` from a property; an unknown value is now counted beside the known
+ones, because it is what a version mismatch looks like in the numbers.
 
 ## Acceptance
 

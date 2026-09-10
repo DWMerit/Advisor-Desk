@@ -36,7 +36,8 @@ from . import support
 
 from build_lineage import build
 from orbit_context import pairs as pairs_module
-from orbit_context import provenance, store, surfaces
+from orbit_context import provenance, repomap, store, surfaces
+from orbit_context.retrieve import repository
 from orbit_context.indexer import index
 
 from .test_vocabulary import offending_words
@@ -408,7 +409,8 @@ class TestThePairsAreQueryable(LineageTestCase):
     def test_every_pair_comes_back_from_the_graph(self):
         found = self.reading()
         self.assertEqual(len(found.pairs), 3)
-        self.assertEqual(found.with_a_direction, 1)
+        self.assertEqual(found.counts.total, 3)
+        self.assertEqual(found.counts.with_a_direction, 1)
 
     def test_the_listing_names_the_direction_and_the_rung(self):
         text = pairs_module.render(self.reading())
@@ -433,6 +435,222 @@ class TestThePairsAreQueryable(LineageTestCase):
 
     def test_the_output_carries_no_forbidden_word(self):
         self.assertEqual(offending_words(pairs_module.render(self.reading())), [])
+
+
+class TestAnOlderSnapshotDoesNotReadAsAMeasurement(LineageTestCase):
+    """A row written before the direction existed carries NULL, not UNKNOWN.
+
+    A store holds many snapshots and many detector sets -- that is the design --
+    so this build reads rows an older one wrote. UNKNOWN is a measurement: a run
+    looked and found nothing that ordered the pair. NULL is the absence of one.
+    Reading the first as the second lets an older snapshot report an order
+    nobody looked for, and reading it as "carrying provenance" -- which negative
+    logic does, because NULL is not the no-producer reason -- says something
+    about the estate that no row supports.
+    """
+
+    def setUp(self):
+        self.older = self.tmp / "older.duckdb"
+        shutil.copy(self.db, self.older)
+        connection = store.connect(self.older)
+        try:
+            connection.execute(
+                "UPDATE gl_context_edge SET direction = NULL, "
+                "direction_reason = NULL, subtype = NULL "
+                "WHERE relationship_kind = 'IDENTICAL_BYTES'"
+            )
+        finally:
+            connection.close()
+
+    def reading(self):
+        return pairs_module.read(self.estate / "ladder", db_path=self.older)
+
+    def test_the_rows_are_counted_apart_from_both_provenance_counts(self):
+        counts = self.reading().counts
+        self.assertEqual(counts.total, 3)
+        self.assertEqual(counts.not_measured, 3)
+        self.assertEqual(counts.with_provenance, 0)
+        self.assertEqual(counts.without_provenance, 0)
+        self.assertEqual(counts.with_a_direction, 0)
+
+    def test_the_map_does_not_report_them_as_carrying_provenance(self):
+        result = repomap.read(self.estate / "ladder", db_path=self.older,
+                              environ={})
+        self.assertEqual(result.identical_pairs, 3)
+        self.assertEqual(result.pairs_with_provenance, 0)
+
+    def test_the_block_names_them_and_says_what_resolves_it(self):
+        text = pairs_module.render(self.reading())
+        self.assertIn("no direction recorded", text)
+        self.assertIn(pairs_module.NOT_MEASURED_REMEDY, text)
+        self.assertIn(pairs_module.NOT_MEASURED, text)
+
+    def test_the_condition_is_reported_in_the_constrained_vocabulary(self):
+        # This block only prints on a store in this state, so the lint over
+        # `repo-map`'s output never reaches it. Linted here instead.
+        self.assertEqual(offending_words(pairs_module.render(self.reading())), [])
+        self.assertEqual(offending_words(pairs_module.NOT_MEASURED), [])
+        self.assertEqual(offending_words(pairs_module.NOT_MEASURED_REMEDY), [])
+
+    def test_a_snapshot_that_did_measure_prints_no_such_line(self):
+        # The line is a condition, not an inventory row. Where every pair was
+        # measured there is nothing to say, and saying it anyway would read as
+        # a defect on every healthy store.
+        self.assertNotIn(
+            "no direction recorded",
+            pairs_module.render(pairs_module.read(self.estate / "ladder",
+                                                  db_path=self.db)),
+        )
+
+
+class TestAStoreThatPredatesTheColumns(LineageTestCase):
+    """The read seam says which command resolves it, rather than a traceback.
+
+    `index` already stops on a store whose columns and the ontology's disagree,
+    and names `migrate`. The read commands reach the same store and, until this
+    was fixed, answered with a raw DuckDB binder error.
+    """
+
+    def setUp(self):
+        self.older = self.tmp / "no-column.duckdb"
+        shutil.copy(self.db, self.older)
+        connection = store.connect(self.older)
+        try:
+            connection.execute(
+                "ALTER TABLE gl_context_edge DROP COLUMN direction"
+            )
+        finally:
+            connection.close()
+
+    def test_the_pairs_command_names_the_remedy(self):
+        with self.assertRaises(pairs_module.PairsError) as raised:
+            pairs_module.read(self.estate / "ladder", db_path=self.older)
+        self.assertIn("orbit-context migrate", str(raised.exception))
+        self.assertIn(str(self.older), str(raised.exception))
+
+    def test_the_map_raises_its_own_error_rather_than_a_duckdb_one(self):
+        with self.assertRaises(repomap.RepoMapError) as raised:
+            repomap.read(self.estate / "ladder", db_path=self.older, environ={})
+        self.assertIn("orbit-context migrate", str(raised.exception))
+
+    def test_the_command_line_prints_it_and_exits_one(self):
+        for argv in (["pairs"], ["repo-map"]):
+            with self.subTest(argv=argv):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "orbit_context.cli", *argv,
+                     "--repo", str(self.estate / "ladder"),
+                     "--db", str(self.older)],
+                    capture_output=True, text=True, cwd=str(support.ORBIT_ROOT),
+                )
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn("orbit-context migrate", completed.stderr)
+                self.assertNotIn("Traceback", completed.stderr)
+
+
+class TestTheBlockStaysReadableWhenNothingIsListed(unittest.TestCase):
+    """The counts are never capped; the listing is, and it says so where it can.
+
+    `repo-map` drops every listing once it has exceeded its budget. The line
+    saying how many pairs went unlisted is indented like the reason rows above
+    it, so without its own heading a reader scanning down reads it as a fourth
+    reason -- the exact misreading the heading exists to prevent.
+    """
+
+    def counts(self, total=3):
+        counts = pairs_module.PairCounts()
+        for _ in range(total):
+            counts.add(provenance.DIRECTION_UNKNOWN,
+                       provenance.NO_PRODUCER_AT_EITHER_END, None)
+        return counts
+
+    def test_the_dropped_line_sits_under_the_listing_heading(self):
+        lines = pairs_module.summary_lines(self.counts(), [], "1.000000000000")
+        index = lines.index("    3 pairs not listed")
+        self.assertEqual(lines[index - 1], "  pair by pair")
+
+    def test_a_partial_listing_says_how_many_more(self):
+        one = pairs_module.Pairing(
+            "a.md", "b.md", "0" * 64, provenance.DIRECTION_UNKNOWN,
+            reason=provenance.NO_PRODUCER_AT_EITHER_END,
+        )
+        lines = pairs_module.summary_lines(self.counts(), [one], "1.000000000000")
+        self.assertIn("    2 more pairs not listed", lines)
+
+    def test_a_snapshot_with_no_pairs_prints_no_listing_heading(self):
+        lines = pairs_module.summary_lines(
+            pairs_module.PairCounts(), [], "1.000000000000"
+        )
+        self.assertNotIn("  pair by pair", lines)
+        self.assertIn("\nIDENTICAL BYTES  0 pairs  [1.000000000000]", lines)
+
+
+class TestAVocabularyThisBuildHasNotSeen(unittest.TestCase):
+    """A value read off a row is data, and this build may not know it.
+
+    These counts are pre-seeded with the reasons and rungs this build declares,
+    and they are filled from rows another detector set may have written. An
+    unknown value is a finding -- it is what a version mismatch looks like in
+    the numbers -- so it is added to the tally rather than dropped, and never
+    raised from a property.
+    """
+
+    def test_an_unknown_reason_is_counted_beside_the_known_ones(self):
+        counts = pairs_module.PairCounts()
+        counts.add(provenance.DIRECTION_UNKNOWN, "a-reason-from-another-set", None)
+        self.assertEqual(counts.by_reason["a-reason-from-another-set"], 1)
+        self.assertEqual(counts.total, 1)
+        for reason in provenance.DIRECTION_UNKNOWN_REASONS:
+            self.assertIn(reason, counts.by_reason)
+
+    def test_an_unknown_rung_is_counted_beside_the_known_ones(self):
+        counts = pairs_module.PairCounts()
+        counts.add(provenance.SOURCE_PRODUCES_TARGET, None, "a-rung-from-another-set")
+        self.assertEqual(counts.by_direction_evidence["a-rung-from-another-set"], 1)
+        self.assertEqual(counts.with_a_direction, 1)
+
+    def test_an_unknown_direction_falls_back_to_what_the_row_says_about_it(self):
+        counts = pairs_module.PairCounts()
+        counts.add("a-direction-from-another-set", "a-reason-from-another-set", None)
+        self.assertEqual(counts.with_a_direction, 0)
+        self.assertEqual(counts.by_reason["a-reason-from-another-set"], 1)
+
+    def test_neither_count_raises_on_any_of_them(self):
+        counts = pairs_module.PairCounts()
+        counts.add("elsewhere", "elsewhere", "elsewhere")
+        counts.add(None, None, None)
+        self.assertEqual(counts.total, 2)
+        self.assertEqual(counts.not_measured, 1)
+        self.assertEqual(counts.with_provenance, 1)
+
+
+class TestTheMapCountsWithoutFetchingEveryPair(LineageTestCase):
+    """A map that prints five pairs must not read every pair to count them.
+
+    Pairing is quadratic inside a hash group: five hundred identical files are a
+    hundred and twenty-four thousand pairs, and the map still prints five. The
+    counts come from a GROUP BY and the listing from a LIMIT, both owned by
+    `pairs`, so bounding the fetch does not cost the map its arithmetic.
+    """
+
+    def test_the_two_statements_agree_and_only_one_fetches_rows(self):
+        connection = store.connect(self.db, read_only=True)
+        try:
+            found = repository(self.estate / "ladder")
+            snapshot = [found.project_id, found.branch, found.commit_sha]
+            counts = pairs_module.counts_from_graph(connection, snapshot)
+            listed = pairs_module.from_graph(connection, snapshot, limit=1)
+        finally:
+            connection.close()
+        self.assertEqual(counts.total, 3)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(counts, pairs_module.PairCounts.of(
+            pairs_module.read(self.estate / "ladder", db_path=self.db).pairs
+        ))
+
+    def test_the_map_lists_no_more_than_its_cap(self):
+        result = repomap.read(self.estate / "ladder", db_path=self.db, environ={})
+        self.assertLessEqual(len(result.pairings), repomap.EXAMPLE_ROWS)
+        self.assertEqual(result.identical_pairs, 3)
 
 
 class TestSeamB(unittest.TestCase):
