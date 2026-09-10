@@ -31,7 +31,7 @@ two is reported as having two.
 
 ## What was built
 
-**The edge.** `RUNG_OF`, declared in `ontology/edges/context/rung_of.yaml`
+**The edge.** `RUNG_OF`, declared in `orbit/ontology/edges/context/rung_of.yaml`
 before a row was written, routed to the same `gl_context_edge` table as the
 other four. It leaves the rung and enters the **base rung** -- the surface in
 the same directory named by the stem alone -- so the base rung's path is the
@@ -47,7 +47,7 @@ permanent UNKNOWN, and a derivation nothing observed would be the same
 over-read. Where the estate evidences one, the `PRODUCES` edges beside these
 rows carry it.
 
-**What the rule keys on**, `RUNG_WORDS` and `RUNG_SUFFIX` in `surfaces.py`, both
+**What the rule keys on**, `RUNG_WORDS` and `RUNG_SUFFIX` in `orbit/orbit_context/surfaces.py`, both
 inside the derived detector version:
 
     <stem>.md beside <stem>.mini.md or <stem>.nano.md, in one directory
@@ -92,7 +92,7 @@ test: this content changes, including from this work.
 | **ladders · rungs** | — | **14 · 42** |
 
 The three extra files walked are this ticket's own: `ontology/edges/context/
-rung_of.yaml`, `orbit_context/ladders.py` and `tests/test_ladders.py`. The edge
+rung_of.yaml`, `orbit/orbit_context/ladders.py` and `orbit/tests/test_ladders.py`. The edge
 total reconciles without a remainder:
 
     7,560 CONTAINS + 224 REFERENCES + 28 IDENTICAL_BYTES + 28 RUNG_OF
@@ -211,8 +211,8 @@ run twice -- were fixed by giving each a single owner.
 ## Acceptance
 
 - [x] The edge type is declared in ontology YAML before any row is written
-      — `ontology/edges/context/rung_of.yaml`, written and loading before
-      `indexer.py` knew the name. It declares no column a sibling edge type had
+      — `orbit/ontology/edges/context/rung_of.yaml`, written and loading before
+      `orbit/orbit_context/indexer.py` knew the name. It declares no column a sibling edge type had
       not already declared, so `gl_context_edge` is unchanged and no migration
       was needed. `tests/test_ladders.py::test_the_edge_type_is_one_the_ontology
       _declares` reads the variant back out of the YAML, and `_edge_row` refuses
@@ -241,7 +241,7 @@ run twice -- were fixed by giving each a single owner.
       and every column name it declares.
 - [x] 326 existing tests still pass, no assertion re-baselined without naming
       what moved it
-      — 359 pass in total. Four count assertions in `test_recognition.py` moved,
+      — 359 pass in total. Four count assertions in `orbit/tests/test_recognition.py` moved,
       and all four moved by the same three files this ticket added to
       `build_lineage`: `clean-code/clean-code.md`,
       `clean-code/clean-code.nano.md` and `drafts/takeoff.mini.md`. Each is

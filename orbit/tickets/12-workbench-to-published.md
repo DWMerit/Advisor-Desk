@@ -24,7 +24,7 @@ stays UNKNOWN. Reading that sentence and writing a `PRODUCES` edge is the
 promotion this project exists to refuse, and it would be indistinguishable in the
 output from an observed one.
 
-`_rule-workbench/PROCESS.md`, `RELEASE.md` and `CHECK_COMPATIBILITY.md` describe
+`_rule-workbench/PROCESS.md`, `_rule-workbench/RELEASE.md` and `_rule-workbench/CHECK_COMPATIBILITY.md` describe
 how the corpus is produced. They are surfaces to be recognised, not instructions
 to be executed or evidence to be promoted.
 
@@ -84,8 +84,8 @@ changes, including from this work.
 
 The detector set moved because the reasons and directions are detector inputs and
 the version is derived from them — the mechanism working, not a bump. Two files
-walked is exactly what this ticket added to the tree (`orbit_context/pairs.py`,
-`tests/test_directions.py`), so the walk reconciles by name rather than by
+walked is exactly what this ticket added to the tree (`orbit/orbit_context/pairs.py`,
+`orbit/tests/test_directions.py`), so the walk reconciles by name rather than by
 re-baselining. Nothing else moved.
 
 ```
@@ -153,7 +153,7 @@ direction this ticket was asked for.
 first recorded here as an open spec question. It is not one: GitLab Orbit has
 already answered it, a symlink is a node that is listed and never read
 (`crates/utils/src/walk.rs:37-57`), with its own skip reason, `non_regular_file`.
-Our walk refuses them outright at `surfaces.py:414`, which makes this a
+Our walk refuses them outright at `orbit/orbit_context/surfaces.py:414`, which makes this a
 divergence from the tool this project exists to emulate rather than a gap in what
 it can see. **Ticket 15** adopts their rule and now blocks 13 — it moves
 `files_walked` and the detector set version, and a comparison run before it would
@@ -164,7 +164,7 @@ applies to governance surfaces is written into tickets 13 and 14.
 are all these symlinks: `traceability.md` names `full.md`, the pointer resolver
 resolves it, and the walk never made the row. One walk and one resolver
 disagreeing about what is in the repository, which is the fault
-`surfaces.py:399` names in so many words. It is a side effect of the refusal
+`orbit/orbit_context/surfaces.py:399` names in so many words. It is a side effect of the refusal
 rather than its own defect, so ticket 15 closes it and asserts the zero.
 
 **The honest route to the direction is still a change to the corpus.** A manifest
@@ -219,7 +219,7 @@ ones, because it is what a version mismatch looks like in the numbers.
       `orbit-context pairs`
 - [x] The prose statement in `traceability.md` produces no `PRODUCES` edge —
       0 `PRODUCES` rows on this repository, and
-      `test_directions.py::TestThisRepository` reads the sentence out of the real
+      `orbit/tests/test_directions.py::TestThisRepository` reads the sentence out of the real
       file rather than a copy, so rewording it cannot quietly retire the test
 - [x] `pairs` never appears in any output without `pairs_with_provenance` beside
       it — ticket 05's rule, still binding. `provenance.summary` is still the

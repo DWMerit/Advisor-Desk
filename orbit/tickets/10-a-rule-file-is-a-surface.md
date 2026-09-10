@@ -21,7 +21,7 @@ Constraints the answer has to satisfy, all already established:
   most of `docs/` are not governance objects.
 - No inference is recorded as fact. A rule that guesses produces output marked as
   a guess.
-- The derived detector version in `detectors.py` is not bypassed. Adding a table,
+- The derived detector version in `orbit/orbit_context/detectors.py` is not bypassed. Adding a table,
   pattern or directory moves it automatically; that mechanism stays.
 
 Then implement the chosen rule, with a **new fixture builder** carrying a
@@ -56,20 +56,20 @@ how a document is written, and both families here are written the same way,
 because one is prose about the other.
 
 **B was chosen**, and the reason is the three files A misses:
-`_rule-workbench/PROCESS.md`, `RELEASE.md`, `CHECK_COMPATIBILITY.md`. They carry
+`_rule-workbench/PROCESS.md`, `_rule-workbench/RELEASE.md`, `_rule-workbench/CHECK_COMPATIBILITY.md`. They carry
 no heading of their own and are governance all the same — they are the
 instructions for producing the other 42, addressed at an agent. What identifies
 them is where they sit, so the corpus rule is what reaches them, and it is the
 only thing in the module that reads rather than quotes.
 
 That reading is recorded as a reading. `recognition` is a new column on
-`surface.yaml` carrying `vendor-name`, `declared-marker` or `corpus-adjacent`;
+`orbit/ontology/nodes/context/surface.yaml` carrying `vendor-name`, `declared-marker` or `corpus-adjacent`;
 the first two are the estate's own statement about a file and the third is this
 tool's, and every count that spans them prints the split rather than the total.
 Ontology YAML before Python, and the column arrives by the mechanism ticket 09
 built for exactly this.
 
-**The guards on the corpus rule**, each a constant in `surfaces.py` and therefore
+**The guards on the corpus rule**, each a constant in `orbit/orbit_context/surfaces.py` and therefore
 inside the derived detector version:
 
 - `CORPUS_DECLARED_SHARE = 0.75`. The workbench clears it at 42 of 45.
@@ -114,8 +114,8 @@ test: this content changes, including from this work.
 | edges | 28 | 7,812 |
 | identical-byte pairs · with provenance | 28 · 0 | 28 · 0 |
 
-The two extra files walked are this ticket's own, `fixtures/build_lineage.py` and
-`tests/test_recognition.py`. The edge total reconciles without a remainder:
+The two extra files walked are this ticket's own, `orbit/fixtures/build_lineage.py` and
+`orbit/tests/test_recognition.py`. The edge total reconciles without a remainder:
 7,560 CONTAINS + 224 REFERENCES + 28 IDENTICAL_BYTES + 0 PRODUCES = 7,812. Byte
 identity and provenance did not move, which is what ticket 09's watch-for asked
 be checked either side of a change that touches counts.
@@ -175,7 +175,7 @@ what is recognised without moving `detectors.VERSION`, because the fix was in
 shipped inside this one uncommitted change and the acceptance run was taken again
 afterwards, unmoved at 87.
 
-The gap is the design's, stated in `detectors.py`'s own docstring — a pattern
+The gap is the design's, stated in `orbit/orbit_context/detectors.py`'s own docstring — a pattern
 *is* the detector, and a constant is hashed while the code reading it is not. It
 held while every rule was a table lookup. It stops holding the moment a rule has
 logic, which is what this ticket added. Recorded here rather than fixed, because
@@ -200,7 +200,7 @@ existed instead of dropping it into an all-zero split.
 - [x] Vendor-named recognition still works — the fixture proves the two paths do
       not interfere
       — `build_lineage` carries a `CLAUDE.md`-shaped repository beside the
-      book-ladder one. `tests/test_recognition.py::TestTheTwoPathsDoNotInterfere`
+      book-ladder one. `orbit/tests/test_recognition.py::TestTheTwoPathsDoNotInterfere`
       asserts vendor names still resolve, that both paths run in one repository,
       and that a file carrying a vendor name *and* a directive heading is
       recorded under the vendor name. `build_estate` is untouched and its 305
@@ -212,12 +212,12 @@ existed instead of dropping it into an all-zero split.
       before and after are readable as two detector sets.
 - [x] Output contains no forbidden vocabulary word
       — the three `recognition` values are linted against the full list by
-      `tests/test_vocabulary.py::TestVocabulary::test_recognition_kinds`.
+      `orbit/tests/test_vocabulary.py::TestVocabulary::test_recognition_kinds`.
 - [x] 269 existing tests still pass, with no count assertion edited
       — 305 was the real figure at the start of this ticket; ticket 09 added
       tests after `08` wrote the number down. 305 pass unmoved and 321 pass in
       total. **One assertion was edited and it is not a count assertion:**
-      `test_ontology.py::test_phase_one_columns` pins the surface table's column
+      `orbit/tests/test_ontology.py::test_phase_one_columns` pins the surface table's column
       list, and adding `recognition` is exactly the change it exists to catch. It
       is renamed `test_declared_columns` and names the one addition and why. No
       count was re-baselined.

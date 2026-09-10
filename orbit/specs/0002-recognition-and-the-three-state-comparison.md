@@ -125,7 +125,7 @@ all of which are already established:
 - It must **not** recognise all 198 markdown files. `LICENSE`, the hero image and most of
   `docs/` are not governance objects.
 - No inference may be recorded as fact. If a rule is a guess, its output is a guess.
-- The detector version in `detectors.py` is derived from detector inputs, so any table,
+- The detector version in `orbit/orbit_context/detectors.py` is derived from detector inputs, so any table,
   pattern or directory added moves it automatically. That mechanism must not be bypassed.
 - Two counts taken either side of this change are not comparable, and the audit must say so.
 
@@ -233,8 +233,8 @@ human. GitLab Orbit has no such words in its output because it indexes code; a
 faithful emulation has none in its output either.
 
 This was checked and five uses were found and removed: two printed row labels and
-one section subtitle in `compare.py`, one `--help` string in `cli.py`, and two
-ontology descriptions in `references.yaml` that shipped inside the graph itself.
+one section subtitle in `orbit/orbit_context/compare.py`, one `--help` string in `orbit/orbit_context/cli.py`, and two
+ontology descriptions in `orbit/ontology/edges/context/references.yaml` that shipped inside the graph itself.
 `authority` appeared nowhere. Module docstrings still use `governance` to explain
 why a module exists, which is prose to a maintainer rather than output.
 

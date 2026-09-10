@@ -92,24 +92,24 @@ the guard the section below asks for, run automatically rather than by hand.
       recorded in this ticket
       — a failed run, decided above. `store.assert_matches_ontology` stops
       `index` before a row is written; `orbit-context migrate` is the remedy it
-      names. `tests/test_store_contents.py::TestDriftFailsTheRun`.
+      names. `orbit/tests/test_store_contents.py::TestDriftFailsTheRun`.
 - [x] The four pre-gate columns are gone from the store
       — `migrate --remove-values` run against `~/.orbit-context/context.duckdb`.
-      `gl_context_surface` now carries the 18 columns `surface.yaml` declares and
+      `gl_context_surface` now carries the 18 columns `orbit/ontology/nodes/context/surface.yaml` declares and
       no others. The three prototype rows that held them, GitLab Orbit's own at
       `0fe19ac`, were removed separately as a row decision, and
       `rows_outside_a_recorded_run` is now empty.
 - [x] Index output lists every repository in the store — branch, commit, index
       time, detector version — not only the one indexed
       — the `store` block, from `store.snapshots`. `indexed_at` is new on
-      `index_run.yaml`; the rest was already recorded and merely unreadable. Each
+      `orbit/ontology/nodes/context/index_run.yaml`; the rest was already recorded and merely unreadable. Each
       entry also carries its rows per table and whether this run wrote it.
 - [x] Re-indexing one repository leaves the others' rows untouched, and the
       output says which rows it replaced
       — `replace_rows` returns what its DELETE took, reported as `replaced` per
       table, per repository and across the run. The full snapshot key is what
       keeps the write off other repositories' rows.
-      `tests/test_store_contents.py::TestReindexingLeavesTheOthersAlone`.
+      `orbit/tests/test_store_contents.py::TestReindexingLeavesTheOthersAlone`.
 - [x] Rows written under a different detector version are distinguishable from
       rows written under the current one
       — every context row shares its snapshot key with a `gl_context_run` row,

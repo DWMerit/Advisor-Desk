@@ -29,7 +29,7 @@ Mirror their `repo-map`. Report:
 
 ## Built
 
-`orbit-context repo-map --repo <path>`, in `orbit_context/repomap.py`.
+`orbit-context repo-map --repo <path>`, in `orbit/orbit_context/repomap.py`.
 
 **Read from the graph, not from a second walk.** Every number comes out of one
 `(project_id, branch, commit_sha)`. Coverage and the indexed boundary were the
@@ -41,7 +41,7 @@ fully indexed, with its reason). Both declared in ontology YAML, neither
 carrying edges.
 
 **The detector set version is derived, not declared.**
-`orbit_context/detectors.py` digests the module-level constants and compiled
+`orbit/orbit_context/detectors.py` digests the module-level constants and compiled
 patterns of the five modules that decide what is recognised, so a boundary fix
 moves it whether or not anyone remembers. A constant somebody has to remember to
 bump is the mechanism this ticket's own prose objects to. Recorded per snapshot

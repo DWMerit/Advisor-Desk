@@ -23,9 +23,9 @@ The tracer bullet. Deliberately the heaviest ticket, because it carries the full
 - [x] Re-running the index does not duplicate rows
 - [x] Statistics JSON reports a non-zero skipped or errored count on a fixture containing a binary file
 
-Each is pinned by test in `orbit/tests/`: `test_index.py` for the query, the
-re-index and the statistics, `test_ontology.py` for the YAML-driven column,
-`test_join.py` for the attach and the lock. The join runs against a `gl_file`
+Each is pinned by test in `orbit/tests/`: `orbit/tests/test_index.py` for the query, the
+re-index and the statistics, `orbit/tests/test_ontology.py` for the YAML-driven column,
+`orbit/tests/test_join.py` for the attach and the lock. The join runs against a `gl_file`
 table built from the DDL of a graph written by `orbit 0.118.1`, in its own
 file, attached read-only — so it holds without a live Orbit install, and it is
 their column shape being joined, not an approximation of it.

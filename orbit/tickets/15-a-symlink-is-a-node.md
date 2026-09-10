@@ -79,7 +79,7 @@ they solved a better way.
 
 Adopt their rule, in their vocabulary.
 
-1. **Walk symlinks.** `surfaces.py:414` stops skipping them.
+1. **Walk symlinks.** `orbit/orbit_context/surfaces.py:414` stops skipping them.
 2. **List, never read.** No bytes are loaded: not for a heading, not for a
    clause, not for a hash. It follows that a symlink is never a byte-identical
    pair and never a rung of a ladder.
@@ -93,7 +93,7 @@ Adopt their rule, in their vocabulary.
 
 `_rule-workbench` is a corpus by the share rule: **42 of 45** Markdown files
 declare themselves, 93.3%, against a 75% threshold. That is what recognises
-`PROCESS.md`, `RELEASE.md` and `CHECK_COMPATIBILITY.md` — the three
+`_rule-workbench/PROCESS.md`, `_rule-workbench/RELEASE.md` and `_rule-workbench/CHECK_COMPATIBILITY.md` — the three
 `corpus-adjacent` surfaces in the whole repository.
 
 Listing fourteen unread `.md` files into that directory takes it to **42 of 59 —
@@ -106,7 +106,7 @@ that a symlink rule caused it.
 must not count against the files that did. A file that was never opened is not
 evidence about the directory either way.
 
-That is an addition to `surfaces.py`'s corpus rule, and it is a detector input,
+That is an addition to `orbit/orbit_context/surfaces.py`'s corpus rule, and it is a detector input,
 so it moves the detector set version on its own — which is the mechanism working.
 
 ## What the numbers do
@@ -126,7 +126,7 @@ The last row is the defect this closes as a side effect. Today
 `_rule-workbench/<book>/traceability.md` writes a pointer to `full.md`, the
 pointer resolver resolves it (`pointers.resolve` returns the path), and the walk
 never made a row for it — 46 edges pointing at files our own walk decided are not
-there. `surfaces.py:399` states the rule those two are breaking: *"Two walks
+there. `orbit/orbit_context/surfaces.py:399` states the rule those two are breaking: *"Two walks
 would be two answers to 'what is in this repository'."* This is one walk and one
 resolver disagreeing, which is the same fault.
 
@@ -147,7 +147,7 @@ every count taken against a contaminated store is arguable until it is not.
 
 ## Acceptance
 
-- [x] `surfaces.py` walks symlinks, and the skip at line 414 is gone
+- [x] `orbit/orbit_context/surfaces.py` walks symlinks, and the skip at line 414 is gone
 - [x] A symlink's bytes are never read — no heading, no clause, no hash — and a
       test asserts it is in no byte-identical pair and no ladder
 - [x] A symlink's recorded size is the link's own, not its target's
@@ -249,7 +249,7 @@ the fix: one walk and one resolver giving one answer to "what is in this
 repository". Nothing was dropped to reach zero.
 
 **The suite is not green, and the red test is not this ticket's.**
-`test_pointers.py`'s `test_unmatched_addresses_stay_in_the_tens` reads 119
+`orbit/tests/test_pointers.py`'s `test_unmatched_addresses_stay_in_the_tens` reads 119
 against a ceiling of 100. It read 119 at `f70fbcb` too, before any of this: the
 two commits that installed the `/implement` and `/tdd` skills brought 25
 unmatched addresses with them, this ticket's own prose 3, and without

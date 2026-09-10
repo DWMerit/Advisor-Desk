@@ -156,7 +156,7 @@ never through it; `files_walked_by_suffix` and `files_walked_by_directory` on
 `gl_context_run` are the walk's own tally, so the markdown row and the
 per-directory row come out of the graph rather than out of a second walk. The
 detector set version is unmoved by all three, which was checked rather than
-assumed: `detectors.py` hashes the module-level constants and patterns of the
+assumed: `orbit/orbit_context/detectors.py` hashes the module-level constants and patterns of the
 five detector modules, and a column added to the YAML is not one.
 
 **The fold happens at compare time, not at index time.** The graph keeps both
@@ -219,5 +219,5 @@ comparable is now exercised at the command line rather than only in-process.
 Left alone, and why: `_short`, `_heading` and the snapshot clause are near-copies
 of `repo-map`'s, and extracting a shared printing module would edit a command
 this ticket has no business in. The comparison's own vocabulary lint lives in
-`test_compare.py` beside its fixture and imports the word list from
-`test_vocabulary.py`, so there is still one list.
+`orbit/tests/test_compare.py` beside its fixture and imports the word list from
+`orbit/tests/test_vocabulary.py`, so there is still one list.
