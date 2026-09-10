@@ -47,7 +47,9 @@ from pathlib import Path
 
 import duckdb
 
-from . import detectors, history, ladders, pointers, provenance, store, surfaces
+from . import (
+    detectors, history, ladders, pairs, pointers, provenance, store, surfaces,
+)
 from .clauses import CLAUSE_TYPES
 from .retrieve import RetrievalError, repository
 
@@ -123,10 +125,12 @@ class RepoMap:
     pointers_by_subtype: dict[str, int] = field(default_factory=dict)
     pointers_in_code_fence: int = 0
     external_refs_by_sub_kind: dict[str, int] = field(default_factory=dict)
-    identical_pairs: int = 0
-    pairs_with_provenance: int = 0
+    # The byte-identical pairs this snapshot holds, each with the direction its
+    # row carries. Read through `pairs.from_graph`, so the map and the `pairs`
+    # command answer the same question once rather than twice -- and the counts
+    # the map prints are derived from the same rows the listing comes from.
+    pairings: list[pairs.Pairing] = field(default_factory=list)
     produces_by_evidence: dict[str, int] = field(default_factory=dict)
-    pair_examples: list[tuple[str, str, str]] = field(default_factory=list)
     # The ladders this snapshot holds, and the rung words that reach none of
     # them. Read through `ladders.from_graph`, so the map and the `ladder`
     # command answer the same question once rather than twice.
@@ -138,6 +142,28 @@ class RepoMap:
     @property
     def files_with_no_surface_kind(self) -> int:
         return self.files_walked - self.files_with_surface_kind
+
+    @property
+    def identical_pairs(self) -> int:
+        return len(self.pairings)
+
+    @property
+    def pairs_with_provenance(self) -> int:
+        """Ticket 05's count, read off the rows rather than asked for again.
+
+        A pair carries provenance where a producer reaches either end, which is
+        exactly a pair whose direction reason is not "no producer named at
+        either end". Derived so this map and the `pairs` command cannot come
+        apart on a number they both print.
+        """
+        return sum(
+            1 for one in self.pairings
+            if one.reason != provenance.NO_PRODUCER_AT_EITHER_END
+        )
+
+    @property
+    def pairs_with_a_direction(self) -> int:
+        return sum(1 for one in self.pairings if one.ordered)
 
     @property
     def inferred_recognitions(self) -> int:
@@ -274,20 +300,11 @@ def _read_graph(connection, snapshot: list, result: RepoMap) -> None:
     for sub_kind, count in _scoped(connection, _EXTERNAL_SQL, snapshot):
         result.external_refs_by_sub_kind[sub_kind] = int(count)
 
-    pairs, with_provenance = _scoped(connection, _IDENTICAL_SQL, snapshot)[0]
-    result.identical_pairs = int(pairs or 0)
-    result.pairs_with_provenance = int(with_provenance or 0)
+    result.pairings = pairs.from_graph(connection, snapshot)
 
     result.produces_by_evidence = {rung: 0 for rung in provenance.EVIDENCE_LADDER}
     for rung, count in _scoped(connection, _PRODUCES_SQL, snapshot):
         result.produces_by_evidence[rung] = int(count)
-
-    result.pair_examples = [
-        (first, second, producer or "")
-        for first, second, producer in _scoped(
-            connection, _PAIR_EXAMPLE_SQL, snapshot, [EXAMPLE_ROWS]
-        )
-    ]
 
     result.ladders, result.rungs_with_no_base_rung = ladders.from_graph(
         connection, snapshot
@@ -395,29 +412,10 @@ _EXTERNAL_SQL = (
     f"FROM gl_context_external_ref WHERE {_SNAPSHOT} GROUP BY 1"
 )
 
-# A pair count on its own over-reads, so it is never read without the count that
-# carries provenance evidence. Both come out of one query for that reason.
-_PAIRS_SUBQUERY = (
-    "SELECT i.source_path, i.target_path, max(p.source_path) AS producer "
-    "FROM gl_context_edge i "
-    "LEFT JOIN gl_context_edge p "
-    "  ON p.relationship_kind = 'PRODUCES' "
-    " AND p.project_id = i.project_id AND p.branch = i.branch "
-    " AND p.commit_sha = i.commit_sha "
-    " AND p.target_path IN (i.source_path, i.target_path) "
-    f"WHERE i.relationship_kind = 'IDENTICAL_BYTES' AND {_snapshot('i')} "
-    "GROUP BY i.source_path, i.target_path"
-)
-
-_IDENTICAL_SQL = (
-    "SELECT count(*), count(*) FILTER (WHERE producer IS NOT NULL) "
-    f"FROM ({_PAIRS_SUBQUERY})"
-)
-
-_PAIR_EXAMPLE_SQL = (
-    f"SELECT * FROM ({_PAIRS_SUBQUERY}) ORDER BY source_path, target_path LIMIT ?"
-)
-
+# The pairs themselves come from `pairs.from_graph`, not from a query here: a
+# pair count over-reads without the count carrying provenance beside it, and the
+# direction each row carries is where that second count now comes from. One
+# reading, shared with the `pairs` command.
 _PRODUCES_SQL = (
     "SELECT subtype, count(*) FROM gl_context_edge "
     f"WHERE relationship_kind = 'PRODUCES' AND {_SNAPSHOT} GROUP BY 1"
@@ -551,21 +549,19 @@ def _external(result: RepoMap) -> list[str]:
 
 
 def _identical(result: RepoMap, examples: bool) -> list[str]:
-    without = result.identical_pairs - result.pairs_with_provenance
-    lines = [
-        _heading("IDENTICAL BYTES", f"{result.identical_pairs} pairs",
-                 result.graph_detector_version),
-        f"  carrying provenance evidence     {result.pairs_with_provenance}",
-        f"  carrying no provenance evidence  {without}",
-    ]
+    """Byte identity, and which pairs the estate evidences an order for.
+
+    Bounded by construction: three counts, one row per evidence rung, one per
+    reason there is no direction, and a capped listing of pairs -- dropped
+    entirely, like every other listing here, when the map has already exceeded
+    its budget once.
+    """
+    lines = pairs.summary_lines(
+        result.pairings, result.graph_detector_version,
+        limit=EXAMPLE_ROWS if examples else 0,
+        shorten=lambda path: _short(path, 44),
+    )
     lines += _rows(list(result.produces_by_evidence.items()), indent="  PRODUCES ")
-    if examples and result.pair_examples:
-        for first, second, producer in result.pair_examples:
-            named = f"  <- {_short(producer, 44)}" if producer else ""
-            lines.append(f"    {_short(first, 44)} = {_short(second, 44)}{named}")
-        remaining = result.identical_pairs - len(result.pair_examples)
-        if remaining > 0:
-            lines.append(f"    {remaining} more pairs not listed")
     return lines
 
 

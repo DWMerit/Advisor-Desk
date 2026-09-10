@@ -20,6 +20,13 @@ shown not to interfere:
     front of them. That is the second naming shape this one repository uses,
     and the ladder rule does not key on it -- which is here to be asserted
     rather than to be discovered later on a repository nobody has looked at.
+
+    Where the published tree already holds a rung, the workbench copy of it is
+    that file's bytes. That is the pairing ticket 12 measures, and the estate
+    carries the two ways it can be explained side by side: one book declares
+    its rung in a manifest, and one states the same relationship in a sentence
+    in its traceability file. The first orders the pair; the second does not,
+    and must not.
 ``vendor``
     The shape phase 1 was built for: ``CLAUDE.md``, ``AGENTS.md``, an agent
     definition. Its ``CLAUDE.md`` also opens with a directive heading, which is
@@ -97,6 +104,40 @@ UNATTACHED_RUNG = {
 # The workbench. Nine files declare themselves; two do not, and are governance
 # all the same -- they are the instructions for producing the other nine.
 WORKBENCH_BOOKS = ("refactoring", "clean-code", "release-it")
+
+# Every published rung, by path. The workbench writes a rung the published tree
+# already holds as *that file's bytes*, which is the shape ticket 12 measures:
+# on the real estate every one of 28 byte-identical pairs is a workbench file
+# matching a published file, one pipeline run 28 times.
+PUBLISHED_RUNGS = {**LADDER, **SHORT_LADDER}
+
+# The honest route to a direction, and the one ticket 12 names: a
+# machine-readable declaration in the corpus. `clean-code` declares its nano
+# rung this way, so that pair is ordered by something observed. `refactoring`
+# says the same thing about its rungs in a sentence, and that pair stays
+# UNKNOWN. One estate, both cases, and the difference between them is the whole
+# of the ticket.
+WORKBENCH_MANIFEST = """{
+  "rungs": [
+    {"input": "_rule-workbench/clean-code/nano.md",
+     "output": "clean-code/clean-code.nano.md"}
+  ]
+}
+"""
+
+# The prose case. The relationship is real, a human reads it in ten seconds,
+# and it is stated in a sentence rather than declared. Spec 0001 s14 lists prose
+# provenance as a permanent UNKNOWN: reading this as a direction would be
+# indistinguishable in the output from a direction something observed, which is
+# the promotion this project exists to refuse.
+TRACEABILITY_PROSE = """# OBEY {book}
+
+## Compression decisions
+
+- `full.md` is kept as the canonical source exposure and should resolve to
+  `../../{book}/{book}.md`; the canonical full source was not edited.
+- Every rung of {book} traces back to that full source.
+"""
 
 WORKBENCH_PROSE = {
     "_rule-workbench/PROCESS.md": _prose(
@@ -190,6 +231,21 @@ def build(destination: str | Path | None = None) -> Path:
     return root
 
 
+def _workbench_rung(book: str, rung: str) -> str:
+    """The workbench copy of one rung: the published bytes where there are any.
+
+    `release-it` is published nowhere in this fixture and `clean-code` has no
+    published mini rung, so those workbench files are the only copy of
+    themselves and pair with nothing. Byte identity has to have something to
+    find *and* something to leave alone, or a count of pairs cannot be read as
+    a count of anything.
+    """
+    published = PUBLISHED_RUNGS.get(f"{book}/{book}.{rung}.md")
+    if published is not None:
+        return published
+    return _rules(book, f"- The {rung} rung of {book}, kept decision-equivalent.")
+
+
 def _build_ladder(root: Path) -> None:
     """A repository whose governance carries no vendor name anywhere."""
     for relative, text in {**LADDER, **SHORT_LADDER, **UNATTACHED_RUNG}.items():
@@ -197,11 +253,12 @@ def _build_ladder(root: Path) -> None:
 
     for book in WORKBENCH_BOOKS:
         _write(root / "_rule-workbench" / book / "mini.md",
-               _rules(book, f"- The mini rung of {book}, kept decision-equivalent."))
+               _workbench_rung(book, "mini"))
         _write(root / "_rule-workbench" / book / "nano.md",
-               _rules(book, f"- The nano rung of {book}, always-on reminders."))
+               _workbench_rung(book, "nano"))
         _write(root / "_rule-workbench" / book / "traceability.md",
-               _rules(book, f"- Every rung of {book} traces back to the full source."))
+               TRACEABILITY_PROSE.format(book=book))
+    _write(root / "_rule-workbench" / "manifest.json", WORKBENCH_MANIFEST)
 
     for relative, text in {**WORKBENCH_PROSE, **DOCS, **PART_DECLARED}.items():
         _write(root / relative, text)

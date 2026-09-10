@@ -1,6 +1,6 @@
 # 12 — Workbench to published carries a direction where evidence allows
 
-**Blocked by:** 11
+**Blocked by:** 11 — **done**
 **Demo when done:** all 28 byte-identical pairs, each with a direction or an
 explicit UNKNOWN, and the two counts never reported apart.
 
@@ -28,16 +28,179 @@ output from an observed one.
 how the corpus is produced. They are surfaces to be recognised, not instructions
 to be executed or evidence to be promoted.
 
+## What was built
+
+**One rule, and the rest of the ticket is a refusal.** A pair is ordered by a
+`PRODUCES` edge between **its own two ends**, and by nothing else. Every
+`IDENTICAL_BYTES` row now carries `direction` — `source-produces-target`,
+`target-produces-source`, or `UNKNOWN` — and where it is UNKNOWN,
+`direction_reason` says which of three cases it is. Where there is a direction
+the row also carries the rung (`subtype`) and the `evidence_path:evidence_line`
+it was read from, so the claim is checkable against the estate rather than taken
+on the tool's word.
+
+`UNKNOWN` rather than an empty column: a blank reads as a column nobody filled
+in, and this is a measurement.
+
+**The three reasons are never summed.**
+
+| `direction_reason` | What it says |
+|---|---|
+| `no-producer-named-at-either-end` | No evidence reaches either file — exactly the pairs `pairs_without_provenance` counts |
+| `producer-named-outside-the-pair` | Something produced one or both ends, and it was not the other end. The pair *has* provenance and still nothing orders it |
+| `each-end-names-the-other-as-its-producer` | Two claims that contradict each other. Choosing between them would be this tool deciding |
+
+The middle one is the acceptance this ticket turns on. A pair whose two files are
+both artifacts of one script and a pair nothing evidences at all are different
+findings, and one "no direction" number would say neither.
+
+**`pairs_with_provenance` did not move and is no longer computed twice.** It is
+now derived from the reasons — a pair carries provenance exactly where its reason
+is not `no-producer-named-at-either-end` — so the index statistics, `repo-map`
+and the new `pairs` command cannot come apart on a number all three print.
+`repo-map` previously answered it with its own `LEFT JOIN`; it now reads the same
+rows through `pairs.from_graph`, on ticket 11's argument that two queries for one
+question is how a map and a command end up disagreeing with no way to tell which
+is right.
+
+**`orbit-context pairs`** is the demo, and it prints all of them, not a sample.
+
+## The acceptance run — evidence, not a test
+
+Advisor-Desk at `23d19a2`, detector set `1.8516f0a599c4`. Never asserted in a
+test: a test that reads live repository content fails whenever that content
+changes, including from this work.
+
+| | before | after |
+|---|---|---|
+| detector set | `1.e2ab2c0e73a6` | `1.8516f0a599c4` |
+| files walked | 252 | 254 |
+| surfaces | 87 | 87 |
+| recognition split | 84 / 0 / 3 | 84 / 0 / 3 |
+| ladders / rungs | 14 / 42 | 14 / 42 |
+| identical-bytes pairs | 28 | 28 |
+| pairs with provenance | 0 | 0 |
+| **pairs with a direction** | — | **0** |
+
+The detector set moved because the reasons and directions are detector inputs and
+the version is derived from them — the mechanism working, not a bump. Two files
+walked is exactly what this ticket added to the tree (`orbit_context/pairs.py`,
+`tests/test_directions.py`), so the walk reconciles by name rather than by
+re-baselining. Nothing else moved.
+
+```
+$ orbit-context pairs
+
+IDENTICAL BYTES  28 pairs  [1.8516f0a599c4]
+  carrying provenance evidence     0
+  carrying no provenance evidence  28
+  carrying a direction             0
+  read off  a PRODUCES edge between the pair's own two ends, on the strongest rung found for it
+  by evidence rung
+    artifact-header  0
+    manifest-declaration  0
+    literal-write-path  0
+  carrying no direction, by reason
+    no-producer-named-at-either-end  28
+    producer-named-outside-the-pair  0
+    each-end-names-the-other-as-its-producer  0
+  pair by pair
+    _rule-workbench/refactoring/mini.md = refactoring/refactoring.mini.md  UNKNOWN: no-producer-named-at-either-end
+    _rule-workbench/refactoring/nano.md = refactoring/refactoring.nano.md  UNKNOWN: no-producer-named-at-either-end
+    ... 26 more, all UNKNOWN for the same reason
+```
+
+### Reconciled by name
+
+**28 pairs is 14 books × 2 rungs, and it is every book.** Each of the fourteen
+book directories contributes exactly two: `mini.md` and `nano.md`. All 28 cross
+from `_rule-workbench/` to a published file; none is workbench-to-workbench or
+published-to-published. The third rung is missing from the pairing for a stated
+reason rather than an unexplained one — `_rule-workbench/<book>/full.md` is a
+**symlink**, and the walk never enters one, which is the same 14 files ticket
+`08`'s hand count already listed as never walked.
+
+**The check ticket 04's precedent asks for: the number is not the evidence.**
+Every one of the 28 comes back `UNKNOWN: no-producer-named-at-either-end`, and
+that is a true statement about this corpus — nothing in the tree declares the
+relationship in a header, a manifest or a write path. The tool is reporting
+UNKNOWN against something a human reads in ten seconds, which is the discomfort
+the ticket said to expect, and the discomfort is the mechanism.
+
+The three shapes the estate does not hold are exercised against fixtures instead,
+so that "0" here reads as a rung that found nothing rather than a rung nobody
+built: `build_lineage` carries a workbench rung declared in a manifest (a
+direction at `manifest-declaration`) beside two stated only in prose, and
+`build_estate`'s `build/rules.md` = `dist/rules.md` — both artifacts of one
+script — is the `producer-named-outside-the-pair` case.
+
+## Found while doing this, and not fixed here
+
+**`full.md` is a symlink, and that is not prose.** The sentence this ticket was
+written about says `full.md` *"should resolve to
+`../../refactoring/refactoring.md`"*, and on disk it **does** — all fourteen of
+them are symlinks pointing exactly there. That is a machine-readable fact about
+the corpus, not a sentence, and it was invisible to this work because the walk
+never enters a symlink.
+
+It still is not a direction. A symlink says two names are one file, which is a
+stronger statement than byte identity and a different one from production: it
+does not say either name was produced from the other. So reading these would
+give the estate an observed *relation* it does not currently have, not the
+direction this ticket was asked for. Recorded here because it is the one place
+the corpus states a relationship somewhere a tool can read it, and because
+deciding what a symlink means is a spec question rather than a detector tweak.
+
+**The honest route to the direction is still a change to the corpus.** A manifest
+declaring input → output is already read, at rung 2, and `build_lineage` now
+proves it end to end on the workbench shape. Nothing in Advisor-Desk writes one.
+That is a corpus change and out of scope, exactly as the ticket said.
+
+**`producer-named-outside-the-pair` is 0 on this estate and non-zero on the phase
+1 fixture.** The reason exists because it is a real shape, not because this
+repository has it. A reason that only ever reads zero on every estate anyone has
+looked at is worth re-opening at ticket 07; this one is not, and the fixture says
+so.
+
+**`repo-map` now holds every pair in memory to print five of them.** It used to
+ask DuckDB for two counts and five example rows; it now reads every
+`IDENTICAL_BYTES` row through `pairs.from_graph`, because the counts and the
+listing have to come off the same rows or the map and the `pairs` command can
+disagree. That is the same trade `ladders.from_graph` already makes, and the
+output stays bounded either way, but the *input* no longer is: pairing is
+quadratic within a hash group, so a repository with a hundred identical files
+would materialise 4,950 rows to print five. Nothing in the estate is near that —
+28 here, and zero-byte files, the one shape that blows up, are already left out
+of the pairing. Re-open it on a measurement rather than on the shape.
+
+**The direction is written at index time, not derived at read time.** It could
+have been a join between `IDENTICAL_BYTES` and `PRODUCES` rows at query time.
+Writing it means the row carries the answer the run computed, on the same
+argument `repo-map` makes for not re-walking the tree — but it also means a
+snapshot written by an older detector set carries that set's answer, which is
+what the version in every header is for.
+
 ## Acceptance
 
-- [ ] All 28 pairs carry either a direction with its evidence rung, or UNKNOWN
-      with the reason
-- [ ] The prose statement in `traceability.md` produces no `PRODUCES` edge
-- [ ] `pairs` never appears in any output without `pairs_with_provenance` beside
-      it — ticket 05's rule, still binding
-- [ ] A pair whose direction is UNKNOWN is not counted as a pair without a
-      producer for a different reason; the two are distinguishable
-- [ ] Output contains no forbidden vocabulary word
+- [x] All 28 pairs carry either a direction with its evidence rung, or UNKNOWN
+      with the reason — 28 of 28, every one UNKNOWN with
+      `no-producer-named-at-either-end`, written on the row and printed by
+      `orbit-context pairs`
+- [x] The prose statement in `traceability.md` produces no `PRODUCES` edge —
+      0 `PRODUCES` rows on this repository, and
+      `test_directions.py::TestThisRepository` reads the sentence out of the real
+      file rather than a copy, so rewording it cannot quietly retire the test
+- [x] `pairs` never appears in any output without `pairs_with_provenance` beside
+      it — ticket 05's rule, still binding. `provenance.summary` is still the
+      only place either number is produced, and `pairs.summary_lines` is now the
+      only place either is printed, shared by `pairs` and `repo-map`
+- [x] A pair whose direction is UNKNOWN is not counted as a pair without a
+      producer for a different reason; the two are distinguishable —
+      `direction_reason` separates them on the row and in
+      `pairs_with_no_direction`, and both are non-zero at once on `build_estate`
+- [x] Output contains no forbidden vocabulary word — linted over `pairs` and
+      `repo-map` output, over every statistics key and value, and over the two
+      new column names
 
 ## Watch for
 

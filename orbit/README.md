@@ -62,6 +62,13 @@ Or read the whole repository at once, before doing anything else:
 orbit/bin/orbit-context repo-map --repo /path/to/the/repository
 ```
 
+Or ask for every byte-identical pair, each with the direction its evidence
+supports or an explicit UNKNOWN and the reason there is none:
+
+```sh
+orbit/bin/orbit-context pairs --repo /path/to/the/repository
+```
+
 Or ask one book for its ladder — every rung it was written at, largest first:
 
 ```sh
@@ -496,12 +503,18 @@ evidence and the count carrying none:
   "pairs": 28,
   "pairs_with_provenance": 0,
   "pairs_without_provenance": 28,
+  "pairs_with_a_direction": 0,
+  "pairs_by_direction_evidence": {"artifact-header": 0, "manifest-declaration": 0,
+                                  "literal-write-path": 0},
+  "pairs_with_no_direction": {"no-producer-named-at-either-end": 28,
+                              "producer-named-outside-the-pair": 0,
+                              "each-end-names-the-other-as-its-producer": 0},
   "produces_edges": 0,
   "produces_by_evidence": {"artifact-header": 0, "manifest-declaration": 0,
                            "literal-write-path": 0},
   "generation_declared_without_producer_named": 0,
   "producer_named_no_indexed_target_match": 0,
-  "files_hashed": 231,
+  "files_hashed": 254,
   "files_not_read": 0,
   "zero_byte_files_not_paired": 1
 }
@@ -513,6 +526,60 @@ pipeline run 28 times — and the provenance explaining all 28 is invisible to t
 tool, because nothing in the tree writes it down. The block is built in one
 function (`provenance.summary`), which is what makes "never alone" a property of
 the code rather than a habit.
+
+### Which end came first
+
+A pair is symmetric. `_rule-workbench/refactoring/nano.md` and
+`refactoring/refactoring.nano.md` are the same bytes, and the row on its own
+says nothing about which one the other came from — a second thing a reader will
+fill in for themselves unless the row answers it.
+
+So every `IDENTICAL_BYTES` row carries a `direction`, and it is derived from one
+thing only: **a `PRODUCES` edge between the pair's own two ends.**
+
+| `direction` | Means |
+|---|---|
+| `source-produces-target` | The evidence puts `source_path` first. `subtype` is the rung it stands on, `evidence_path:evidence_line` where it was read |
+| `target-produces-source` | The same, the other way round. The row is written with the lexicographically first path as the source, so the direction is said against that ordering rather than by reordering the row |
+| `UNKNOWN` | Nothing ordered the pair. `direction_reason` says which of three cases this is |
+
+`UNKNOWN` rather than an empty column, because a blank reads as a column nobody
+filled in and this is a measurement.
+
+| `direction_reason` | Means |
+|---|---|
+| `no-producer-named-at-either-end` | No evidence reaches either file. These are exactly the pairs `pairs_without_provenance` counts |
+| `producer-named-outside-the-pair` | Something produced one or both ends, and it was not the other end. The pair *has* provenance and still nothing that orders it |
+| `each-end-names-the-other-as-its-producer` | Two claims that contradict each other. Choosing between them would be this tool deciding, and it has no basis to |
+
+The middle one is why the reasons are never summed. A pair whose two files are
+both artifacts of one script is a different finding from a pair nothing
+evidences at all, and one number would say neither.
+
+**A sentence does not order a pair.** `_rule-workbench/refactoring/traceability.md`
+says `full.md` *"should resolve to `../../refactoring/refactoring.md`"* — a
+producer relationship a human reads in ten seconds. Spec §14 lists prose
+provenance as a permanent UNKNOWN, and it stays UNKNOWN: a direction read out of
+a sentence would be indistinguishable in this table from one something observed,
+which is what makes it worse than no direction at all. The honest route to the
+direction is a machine-readable declaration in the corpus, which is a change to
+the corpus.
+
+`orbit-context pairs` prints every pair with what is known about it:
+
+```
+IDENTICAL BYTES  28 pairs  [1.8516f0a599c4]
+  carrying provenance evidence     0
+  carrying no provenance evidence  28
+  carrying a direction             0
+  ...
+  pair by pair
+    _rule-workbench/refactoring/nano.md = refactoring/refactoring.nano.md  UNKNOWN: no-producer-named-at-either-end
+```
+
+`repo-map` prints the same block from the same reading — `pairs.from_graph` —
+capped to a few example rows, so the map and the command cannot disagree about a
+number they both print.
 
 Two files are only ever paired **within one repository**: two repositories are
 two snapshots with their own branch and commit, and an edge across them would
@@ -794,9 +861,10 @@ reported at two, beside the books at three.
 per repository. `graph`
 counts `repositories`, `surfaces`, `clauses`, `edges` and `pointers`, and reports
 `external_refs` as the three `sub_kind` counts separately, always all three, even
-at zero. `identical_bytes` is the byte-identity and provenance block above,
-present at estate level and per repository, with every key including each rung
-of the ladder reported even at zero. Skipped entries carry
+at zero. `identical_bytes` is the byte-identity, provenance and direction block above,
+present at estate level and per repository, with every key reported even at
+zero — each rung of the ladder, and each of the three reasons a pair carries no
+direction. Skipped entries carry
 `reason`, errored entries carry `kind`, matching their `SkippedFile` and
 `ErroredFile`. A `repositories` array itemises each repository found under the
 indexed root, and `schema` reports, per table, which columns the YAML added and

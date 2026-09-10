@@ -285,24 +285,34 @@ def _innermost(spans: list[tuple[int, int, int]], offset: int) -> int | None:
 
 
 def _identical_byte_edges(edge: EdgeType, repo: Repository,
-                          matched: list[provenance_module.Pair]) -> list[dict]:
+                          ordered: list[provenance_module.Direction]) -> list[dict]:
     """One edge per pair of files whose bytes hash the same.
 
-    Pure observation, and the row says only what was observed: two paths and
-    the digest they share. Why they are identical, and whether that is
-    intended, are not derived here -- spec 0001 §14 keeps the second as a
-    permanent UNKNOWN.
+    The pair itself is pure observation: two paths and the digest they share.
+    Whether they are *meant* to be identical is not derived here -- spec 0001
+    §14 keeps that a permanent UNKNOWN.
+
+    Which end came first is derived, and only from a ``PRODUCES`` edge between
+    the pair's own two ends. Where there is one the row carries the direction,
+    the rung it stands on and the file:line it was read from; where there is
+    none the row carries UNKNOWN and the reason. Never blank, because a blank
+    reads as a column nobody filled in rather than as a measurement.
     """
     return [
         _edge_row(
             edge, repo,
-            _file_id(repo, pair.first_path), FILE_NODE,
-            _file_id(repo, pair.second_path), FILE_NODE,
-            source_path=pair.first_path,
-            target_path=pair.second_path,
-            content_sha256=pair.sha256,
+            _file_id(repo, one.pair.first_path), FILE_NODE,
+            _file_id(repo, one.pair.second_path), FILE_NODE,
+            source_path=one.pair.first_path,
+            target_path=one.pair.second_path,
+            content_sha256=one.pair.sha256,
+            direction=one.direction,
+            direction_reason=one.reason,
+            subtype=one.evidence,
+            evidence_path=one.evidence_path,
+            evidence_line=one.evidence_line,
         )
-        for pair in matched
+        for one in ordered
     ]
 
 
@@ -635,7 +645,12 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     scan = provenance_module.read_tree(repo.root, walked)
     matched = provenance_module.pairs(scan.contents, scan.zero_byte)
     productions = provenance_module.strongest(scan.productions)
-    edge_rows.extend(_identical_byte_edges(identical_bytes, repo, matched))
+    # A pair is symmetric, so which end came first is a second thing the row
+    # would not say. Ordered here from the same productions the PRODUCES rows
+    # are written from, so a direction on a pair row and the edge that
+    # evidences it cannot disagree.
+    ordered = provenance_module.directions(matched, productions)
+    edge_rows.extend(_identical_byte_edges(identical_bytes, repo, ordered))
     edge_rows.extend(_produces_edges(produces, repo, productions))
 
     result.ladders = _ladder_tally(rung_rows, rungs_without_a_base)

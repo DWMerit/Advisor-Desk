@@ -15,6 +15,18 @@
 # Byte-identity on its own over-reads. A count of matching pairs is never
 # emitted without the count of those pairs carrying provenance evidence, which
 # is what the PRODUCES edges beside these rows hold.
+#
+# **The direction is the same argument one level in.** The pair is symmetric, so
+# which end came first is a second thing the row does not say -- and on the
+# estate this was built for, all 28 pairs are a workbench file matching a
+# published file with the order plain to a human and invisible to the tool. So
+# every row carries `direction`: the order where a PRODUCES edge relates the
+# pair's own two ends, and UNKNOWN with `direction_reason` where nothing does.
+#
+# A producer elsewhere in the tree does not order a pair, and neither does a
+# sentence. Spec 0001 s14 keeps prose provenance a permanent UNKNOWN, and a
+# direction read out of a sentence would be indistinguishable in this table from
+# one something observed -- which is what makes it worse than no direction.
 
 edge_type: IDENTICAL_BYTES
 domain: context
@@ -114,6 +126,44 @@ properties:
     mutable: false
     description: "The sha256 both files hash to, in hex. It is the whole evidence for this edge, so it is carried on the row rather than recomputed. NULL on edge types that are not derived from a hash."
 
+  direction:
+    type: string
+    source: direction
+    nullable: true
+    mutable: false
+    description: "Which end of the pair the evidence puts first, stated against this row's own columns: source-produces-target | target-produces-source | UNKNOWN. The row is written with the lexicographically first path as the source, so the direction is said against that ordering rather than by reordering the row. UNKNOWN rather than NULL where nothing ordered the pair: a NULL reads as a column nobody filled in, and this is a measurement. NULL on edge types that carry no direction."
+    selectivity: low
+
+  direction_reason:
+    type: string
+    source: direction_reason
+    nullable: true
+    mutable: false
+    description: "Why a pair carries no direction: no-producer-named-at-either-end | producer-named-outside-the-pair | each-end-names-the-other-as-its-producer. Three statements, never merged -- a pair whose ends are both artifacts of one script has provenance and still nothing that orders them, and counting it with the pairs no evidence reaches would be untrue about both. NULL where a direction was found, and on edge types that carry no direction."
+    selectivity: low
+
+  subtype:
+    type: string
+    source: subtype
+    nullable: true
+    mutable: false
+    description: "Which rung of the evidence ladder carried the direction: artifact-header | manifest-declaration | literal-write-path. The same vocabulary PRODUCES uses, because it is the same evidence read from the same place. NULL where the pair carries no direction, and on edge types that carry no detector."
+    selectivity: low
+
+  evidence_path:
+    type: string
+    source: evidence_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path of the file the direction was read from -- usually neither end of the pair, because a manifest declaring one end produces the other is a third file. NULL where the pair carries no direction, and on edge types that carry no evidence locator."
+
+  evidence_line:
+    type: int64
+    source: evidence_line
+    nullable: true
+    mutable: false
+    description: "1-based line the direction was read from. With evidence_path it is the file:line locator, so a direction this table asserts can be read back out of the estate rather than taken on the tool's word. NULL where the pair carries no direction."
+
 storage:
   settings:
     index_granularity: "1024"
@@ -131,5 +181,10 @@ storage:
     - {name: source_path, type: "String", codec: ["ZSTD(3)"]}
     - {name: target_path, type: "String", codec: ["ZSTD(3)"]}
     - {name: content_sha256, type: "String", codec: ["ZSTD(1)"]}
+    - {name: direction, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: direction_reason, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: subtype, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: evidence_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: evidence_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
   indexes:
     - {name: idx_content_sha256, column: content_sha256, type: "bloom_filter(0.0001)", granularity: 1}

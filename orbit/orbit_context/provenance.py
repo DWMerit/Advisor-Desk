@@ -65,6 +65,38 @@ LITERAL_WRITE_PATH = "literal-write-path"
 
 EVIDENCE_LADDER = (ARTIFACT_HEADER, MANIFEST_DECLARATION, LITERAL_WRITE_PATH)
 
+# Which end of a byte-identical pair the evidence puts first. The pair itself is
+# symmetric -- one row per unordered pair, lexicographically first path as the
+# source -- so a direction is stated against that ordering rather than by
+# reordering the row, and `source` and `target` here are the row's own columns.
+SOURCE_PRODUCES_TARGET = "source-produces-target"
+TARGET_PRODUCES_SOURCE = "target-produces-source"
+DIRECTIONS = (SOURCE_PRODUCES_TARGET, TARGET_PRODUCES_SOURCE)
+
+# And the value for a pair nothing ordered. Spelled the way spec 0001 s14
+# spells a permanent unknown, and written on the row rather than left blank: a
+# NULL reads as a column nobody filled in, and this is a measurement.
+DIRECTION_UNKNOWN = "UNKNOWN"
+
+# Why a pair carries no direction. Three different statements about the estate,
+# never merged into one, because "nothing here evidences a producer at all" and
+# "something produced one of these and it was not the other" are what a reader
+# is trying to tell apart.
+#
+# The second is the case that makes this worth separating. A pair whose ends are
+# both artifacts of one script has provenance -- ticket 05's count sees it -- and
+# still nothing that orders the two. Folding it in with the pairs no evidence
+# reaches would say something untrue about both.
+NO_PRODUCER_AT_EITHER_END = "no-producer-named-at-either-end"
+PRODUCER_OUTSIDE_THE_PAIR = "producer-named-outside-the-pair"
+EACH_END_NAMES_THE_OTHER = "each-end-names-the-other-as-its-producer"
+
+DIRECTION_UNKNOWN_REASONS = (
+    NO_PRODUCER_AT_EITHER_END,
+    PRODUCER_OUTSIDE_THE_PAIR,
+    EACH_END_NAMES_THE_OTHER,
+)
+
 # How far into a file a generation header is looked for. A header is a header:
 # past this it is prose about generation, not the artifact declaring itself.
 HEADER_LINES = 20
@@ -161,6 +193,26 @@ class Production:
     evidence: str              # which rung of the ladder
     evidence_path: str
     evidence_line: int
+
+
+@dataclass(frozen=True)
+class Direction:
+    """One pair, and which way round the evidence puts it -- or why it does not.
+
+    Exactly one of the two halves is filled in. Where ``direction`` is a
+    direction, ``producer_path``, ``artifact_path``, ``evidence`` and the
+    locator are set and ``reason`` is None; where it is ``DIRECTION_UNKNOWN``
+    they are all None and ``reason`` says which of the three cases this is.
+    """
+
+    pair: Pair
+    direction: str
+    reason: str | None = None
+    producer_path: str | None = None
+    artifact_path: str | None = None
+    evidence: str | None = None
+    evidence_path: str | None = None
+    evidence_line: int | None = None
 
 
 @dataclass
@@ -517,6 +569,76 @@ def strongest(productions: list[Production]) -> list[Production]:
     return kept
 
 
+def directions(matched: list[Pair],
+               productions: list[Production]) -> list[Direction]:
+    """Order each pair where the evidence orders it, and say why where it does not.
+
+    **A pair is ordered only by a ``PRODUCES`` edge between its own two ends.**
+    That is the whole rule, and everything else about it is a refusal.
+
+    A producer somewhere else in the tree does not order a pair. Two files that
+    are the same bytes, one of which some script wrote, says that the script
+    wrote one of them -- not that the other is where it came from. Reading the
+    second out of the first is the promotion this project exists to refuse, and
+    a promoted direction is indistinguishable in the output from an observed
+    one, which is what makes it worse than no direction at all.
+
+    A relationship stated in prose does not order a pair either, and it does not
+    reach this function to be refused: nothing upstream turns a sentence into a
+    ``Production``, so a sentence arrives here as the absence of evidence. Spec
+    0001 s14 keeps prose provenance a permanent UNKNOWN.
+
+    Where a later ticket wants the direction the corpus only describes, the
+    honest route is a machine-readable declaration in the corpus -- which is a
+    change to the corpus, not to this rule.
+    """
+    ordered: list[Direction] = []
+    # Keyed on both ends, so the lookup is the question being asked: is there a
+    # production whose producer is one end of *this* pair and whose artifact is
+    # the other. Only resolved producers -- an edge needs both ends, and a
+    # producer named but not in the tree cannot be one of them.
+    between = {
+        (one.producer_path, one.artifact_path): one
+        for one in productions if one.producer_path is not None
+    }
+    produced = {one.artifact_path for one in productions
+                if one.producer_path is not None}
+
+    for pair in matched:
+        first, second = pair.first_path, pair.second_path
+        forward = between.get((first, second))
+        backward = between.get((second, first))
+        if forward is not None and backward is not None:
+            # Two claims, each naming the other end as its producer. Choosing
+            # between them would be this tool deciding, and it has no basis to.
+            ordered.append(_unordered(pair, EACH_END_NAMES_THE_OTHER))
+            continue
+        found = forward or backward
+        if found is not None:
+            ordered.append(Direction(
+                pair=pair,
+                direction=(SOURCE_PRODUCES_TARGET if forward is not None
+                           else TARGET_PRODUCES_SOURCE),
+                producer_path=found.producer_path,
+                artifact_path=found.artifact_path,
+                evidence=found.evidence,
+                evidence_path=found.evidence_path,
+                evidence_line=found.evidence_line,
+            ))
+            continue
+        ordered.append(_unordered(
+            pair,
+            PRODUCER_OUTSIDE_THE_PAIR
+            if first in produced or second in produced
+            else NO_PRODUCER_AT_EITHER_END,
+        ))
+    return ordered
+
+
+def _unordered(pair: Pair, reason: str) -> Direction:
+    return Direction(pair=pair, direction=DIRECTION_UNKNOWN, reason=reason)
+
+
 def summary(scan: Scan, matched: list[Pair],
             productions: list[Production]) -> dict:
     """The one place a pair count is produced -- always beside its provenance.
@@ -526,13 +648,35 @@ def summary(scan: Scan, matched: list[Pair],
     returned in the same dict rather than left to a caller to remember. Every
     key is present at zero, including each rung of the ladder, so a rung that
     found nothing reads as a rung that found nothing.
+
+    The direction counts are here for the same reason and by the same rule.
+    ``pairs_with_a_direction`` and ``pairs_with_no_direction`` sum to ``pairs``,
+    and the second is split by *why* rather than reported as one number: a pair
+    nothing evidences at all and a pair whose producer is a third file are
+    different statements, and a single "no direction" count says neither.
+
+    :func:`directions` is called here rather than passed in, so that a caller
+    holding pairs and productions cannot produce these counts against a
+    different reading of them than the rows carry.
     """
-    produced = {production.artifact_path for production in productions
-                if production.producer_path is not None}
-    with_provenance = sum(
-        1 for pair in matched
-        if pair.first_path in produced or pair.second_path in produced
-    )
+    ordered = directions(matched, productions)
+    by_reason = {reason: 0 for reason in DIRECTION_UNKNOWN_REASONS}
+    by_direction_evidence = {rung: 0 for rung in EVIDENCE_LADDER}
+    with_a_direction = 0
+    for one in ordered:
+        if one.direction == DIRECTION_UNKNOWN:
+            by_reason[one.reason] += 1
+            continue
+        with_a_direction += 1
+        by_direction_evidence[one.evidence] += 1
+
+    # Ticket 05's count, unmoved: a pair carries provenance where a producer
+    # reaches either end. Derived from the reasons rather than recomputed, so
+    # the two readings cannot come apart -- a pair with no producer at either
+    # end is exactly the pair ticket 05 counted as carrying none.
+    without_provenance = by_reason[NO_PRODUCER_AT_EITHER_END]
+    with_provenance = len(matched) - without_provenance
+
     by_evidence = {rung: 0 for rung in EVIDENCE_LADDER}
     unresolved = 0
     for production in productions:
@@ -543,7 +687,10 @@ def summary(scan: Scan, matched: list[Pair],
     return {
         "pairs": len(matched),
         "pairs_with_provenance": with_provenance,
-        "pairs_without_provenance": len(matched) - with_provenance,
+        "pairs_without_provenance": without_provenance,
+        "pairs_with_a_direction": with_a_direction,
+        "pairs_by_direction_evidence": by_direction_evidence,
+        "pairs_with_no_direction": by_reason,
         "produces_edges": sum(by_evidence.values()),
         "produces_by_evidence": by_evidence,
         "generation_declared_without_producer_named":

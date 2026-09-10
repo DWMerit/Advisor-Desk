@@ -1,11 +1,12 @@
 """``orbit-context`` — the context-domain indexer for Orbit's local graph.
 
-Five commands. ``index`` writes the graph; ``migrate`` brings an existing store
+Six commands. ``index`` writes the graph; ``migrate`` brings an existing store
 to the ontology when the two have parted; ``show`` reads one clause back out of
 the file it came from, at the byte offsets the graph recorded; ``repo-map``
 prints one repository's governance surface, read from the graph, inside a stated
 budget; ``ladder`` walks the ``RUNG_OF`` edges of one book and prints its rungs
-in size order.
+in size order; ``pairs`` prints every byte-identical pair with the direction its
+evidence supports, or an explicit UNKNOWN and the reason there is none.
 
 ``show`` writes the clause's bytes to stdout and nothing else, so what comes out
 is the span of the file and can be compared to it byte for byte; the locator
@@ -18,7 +19,7 @@ import argparse
 import json
 import sys
 
-from . import history, ladders, repomap, retrieve, store
+from . import history, ladders, pairs, repomap, retrieve, store
 from .indexer import index, migrate
 from .ontology import OntologyError
 from .store import StoreError
@@ -144,6 +145,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
         help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
     )
+
+    pairs_parser = subparsers.add_parser(
+        "pairs",
+        help="Print every byte-identical pair with its direction, or UNKNOWN "
+             "and why there is none",
+    )
+    pairs_parser.add_argument(
+        "--repo", dest="repo", default=".",
+        help="A path inside the repository to read (default: the working "
+             "directory). Its git state selects the indexed snapshot.",
+    )
+    pairs_parser.add_argument(
+        "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
+        help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
+    )
     return parser
 
 
@@ -228,6 +244,15 @@ def main(argv: list[str] | None = None) -> int:
             print(ladders.ladder(args.repo, db_path=args.db_path, name=args.name),
                   end="")
         except (ladders.LadderError, StoreError, GitError,
+                retrieve.RetrievalError) as error:
+            print(f"orbit-context: {error}", file=sys.stderr)
+            return 1
+        return 0
+
+    if args.command == "pairs":
+        try:
+            print(pairs.pairs(args.repo, db_path=args.db_path), end="")
+        except (pairs.PairsError, StoreError, GitError,
                 retrieve.RetrievalError) as error:
             print(f"orbit-context: {error}", file=sys.stderr)
             return 1

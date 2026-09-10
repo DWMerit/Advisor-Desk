@@ -5,15 +5,15 @@ Spec: `orbit/specs/0002-recognition-and-the-three-state-comparison.md`
 Six tickets. Work top to bottom; each is blocked by the one before it, because
 each measures something the previous one made measurable.
 
-**Three are done. The frontier is 12.**
+**Four are done. The frontier is 13.**
 
 | # | Ticket | Blocked by | State |
 |---|---|---|---|
 | 09 | The store holds only what this run put there | — | done |
 | 10 | A rule file is a surface | 09 | done |
 | 11 | The ladder is queryable | 10 | done |
-| 12 | Workbench to published carries a direction where evidence allows | 11 | **frontier** |
-| 13 | Two states compare | 12 | |
+| 12 | Workbench to published carries a direction where evidence allows | 11 | done |
+| 13 | Two states compare | 12 | **frontier** |
 | 14 | Three states, and ticket 07 re-scoped | 13 | |
 
 Each closed ticket carries its own acceptance run as evidence, hand-checked and
@@ -68,6 +68,11 @@ The 42 was then reached a second way by ticket 11, which found the same files as
 routes to one figure is what makes it a reconciliation rather than a count.
 
 Byte-identical pairs found by phase 1: **28**, with provenance: **0**.
+Ticket 12 reached the same 28 a second way — 14 books at two rungs each, `mini`
+and `nano`, every one crossing from `_rule-workbench/` to a published file, with
+the third rung absent because `full.md` is a symlink the walk never enters. All
+28 carry an explicit `UNKNOWN: no-producer-named-at-either-end`: nothing in this
+corpus declares the relationship anywhere a tool can read it.
 One ladder, for reference: `refactoring.md` 17,866 / `.mini.md` 5,167 /
 `.nano.md` 1,986 bytes — the three ticket 11 printed back, byte for byte.
 

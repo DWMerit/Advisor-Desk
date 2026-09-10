@@ -1,0 +1,555 @@
+"""Workbench to published: a direction where the evidence supports one.
+
+Byte identity is symmetric. Two files hashing the same says nothing about which
+one came first, and on the real estate all 28 pairs are a workbench file
+matching a published file -- one pipeline run 28 times, with the direction
+obvious to a human and invisible to the tool.
+
+What is asserted here is that a pair is ordered **only** where a ``PRODUCES``
+edge relates its two ends, that every pair the graph holds carries either that
+direction with its evidence rung or an explicit UNKNOWN with a reason, and that
+the two ways a pair can fail to be ordered stay apart: a pair with a producer
+that does not order it is not counted as a pair with no producer at all.
+
+The prose case is the point of the ticket and it is asserted against this
+repository's own files, not against a fixture. ``traceability.md`` states the
+relationship in a sentence a human reads in ten seconds. Spec 0001 §14 lists
+prose provenance as a permanent UNKNOWN, so it stays UNKNOWN: a direction read
+out of a sentence would be indistinguishable in the output from one something
+observed, and that indistinguishability is the whole failure this project
+exists to refuse.
+
+Counts are against ``build_lineage`` and ``build_estate``, never against a live
+repository -- except where the assertion *is* that nothing was promoted, which
+can only be checked where the prose actually is.
+"""
+
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from . import support
+
+from build_lineage import build
+from orbit_context import pairs as pairs_module
+from orbit_context import provenance, store, surfaces
+from orbit_context.indexer import index
+
+from .test_vocabulary import offending_words
+
+
+def _pair(first: str, second: str) -> provenance.Pair:
+    return provenance.Pair("0" * 64, first, second)
+
+
+def _production(producer: str, artifact: str,
+                evidence: str = provenance.MANIFEST_DECLARATION,
+                ) -> provenance.Production:
+    return provenance.Production(
+        producer_address=producer,
+        producer_path=producer,
+        artifact_path=artifact,
+        evidence=evidence,
+        evidence_path="build/manifest.json",
+        evidence_line=3,
+    )
+
+
+class TestTheDirectionAlgebra(unittest.TestCase):
+    """The rule itself, at the one seam where every case can be put to it.
+
+    A direction comes from a ``PRODUCES`` edge between the two ends of the pair
+    and from nothing else. The estate fixtures reach three of these cases; the
+    fourth -- a producer that sorts after its artifact -- is a property of the
+    ordering rather than of any estate, so it is put here rather than bent into
+    a fixture to make it appear.
+    """
+
+    def order(self, matched, productions):
+        found = provenance.directions(matched, productions)
+        self.assertEqual(len(found), len(matched))
+        return found[0]
+
+    def test_a_declaration_between_the_two_ends_orders_the_pair(self):
+        one = self.order(
+            [_pair("workbench/nano.md", "published/nano.md")],
+            [_production("workbench/nano.md", "published/nano.md")],
+        )
+        self.assertEqual(one.direction, provenance.SOURCE_PRODUCES_TARGET)
+        self.assertEqual(one.producer_path, "workbench/nano.md")
+        self.assertEqual(one.artifact_path, "published/nano.md")
+        self.assertEqual(one.evidence, provenance.MANIFEST_DECLARATION)
+        self.assertIsNone(one.reason)
+
+    def test_the_pair_is_ordered_the_way_the_evidence_reads_not_the_way_it_sorts(self):
+        # The producer sorting after its artifact. Nothing in the estate makes
+        # this happen and nothing stops it, and a rule that quietly assumed the
+        # lexicographically first path is the producer would pass every other
+        # test here.
+        one = self.order(
+            [_pair("build/rules.md", "workbench/rules.md")],
+            [_production("workbench/rules.md", "build/rules.md")],
+        )
+        self.assertEqual(one.direction, provenance.TARGET_PRODUCES_SOURCE)
+        self.assertEqual(one.producer_path, "workbench/rules.md")
+        self.assertEqual(one.artifact_path, "build/rules.md")
+
+    def test_a_producer_outside_the_pair_does_not_order_it(self):
+        one = self.order(
+            [_pair("build/rules.md", "dist/rules.md")],
+            [_production("scripts/build.py", "build/rules.md")],
+        )
+        self.assertEqual(one.direction, provenance.DIRECTION_UNKNOWN)
+        self.assertEqual(one.reason, provenance.PRODUCER_OUTSIDE_THE_PAIR)
+        self.assertIsNone(one.producer_path)
+        self.assertIsNone(one.evidence)
+
+    def test_no_evidence_at_either_end_is_its_own_reason(self):
+        one = self.order([_pair("a.md", "b.md")], [])
+        self.assertEqual(one.direction, provenance.DIRECTION_UNKNOWN)
+        self.assertEqual(one.reason, provenance.NO_PRODUCER_AT_EITHER_END)
+
+    def test_each_end_naming_the_other_leaves_the_pair_unordered(self):
+        # Two claims that contradict each other about which end came first.
+        # Picking one would be this tool deciding, and it has no basis to.
+        one = self.order(
+            [_pair("a.md", "b.md")],
+            [_production("a.md", "b.md"), _production("b.md", "a.md")],
+        )
+        self.assertEqual(one.direction, provenance.DIRECTION_UNKNOWN)
+        self.assertEqual(one.reason, provenance.EACH_END_NAMES_THE_OTHER)
+
+    def test_a_producer_the_tree_does_not_hold_orders_nothing(self):
+        # An edge needs both ends. A producer named but unresolved is counted
+        # elsewhere; it cannot order a pair, because there is nothing to order.
+        unresolved = provenance.Production(
+            producer_address="scripts/absent.py",
+            producer_path=None,
+            artifact_path="build/rules.md",
+            evidence=provenance.ARTIFACT_HEADER,
+            evidence_path="build/rules.md",
+            evidence_line=1,
+        )
+        one = self.order([_pair("build/rules.md", "dist/rules.md")], [unresolved])
+        self.assertEqual(one.reason, provenance.NO_PRODUCER_AT_EITHER_END)
+
+    def test_every_pair_comes_back_with_one_or_the_other(self):
+        found = provenance.directions(
+            [_pair("a.md", "b.md"), _pair("c.md", "d.md")],
+            [_production("c.md", "d.md")],
+        )
+        for one in found:
+            with self.subTest(pair=(one.pair.first_path, one.pair.second_path)):
+                if one.direction == provenance.DIRECTION_UNKNOWN:
+                    self.assertIn(one.reason, provenance.DIRECTION_UNKNOWN_REASONS)
+                    self.assertIsNone(one.evidence)
+                else:
+                    self.assertIsNone(one.reason)
+                    self.assertIn(one.evidence, provenance.EVIDENCE_LADDER)
+
+
+class LineageTestCase(unittest.TestCase):
+    """Seam A: build the estate, index it, assert on the stats and the rows."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-directions-"))
+        cls.estate = build(cls.tmp / "estate")
+        cls.db = cls.tmp / "graph.duckdb"
+        cls.stats = index(cls.estate, db_path=cls.db)
+        cls.by_repo = {entry["repository"]: entry
+                       for entry in cls.stats["repositories"]}
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def rows(self):
+        connection = store.connect(self.db, read_only=True)
+        try:
+            return connection.execute(
+                "SELECT source_path, target_path, direction, direction_reason, "
+                "subtype, evidence_path, evidence_line FROM gl_context_edge "
+                "WHERE relationship_kind = 'IDENTICAL_BYTES' AND branch = 'main' "
+                "ORDER BY source_path, target_path"
+            ).fetchall()
+        finally:
+            connection.close()
+
+
+class TestTheDirectionIsOnTheRow(LineageTestCase):
+    """The pair the corpus declares, and the two it only describes."""
+
+    def test_the_estate_holds_the_three_pairs_the_fixture_put_there(self):
+        self.assertEqual(
+            [(row[0], row[1]) for row in self.rows()],
+            [
+                ("_rule-workbench/clean-code/nano.md", "clean-code/clean-code.nano.md"),
+                ("_rule-workbench/refactoring/mini.md",
+                 "refactoring/refactoring.mini.md"),
+                ("_rule-workbench/refactoring/nano.md",
+                 "refactoring/refactoring.nano.md"),
+            ],
+        )
+
+    def test_the_declared_rung_carries_a_direction_and_its_rung(self):
+        by_source = {row[0]: row for row in self.rows()}
+        row = by_source["_rule-workbench/clean-code/nano.md"]
+        self.assertEqual(row[2], provenance.SOURCE_PRODUCES_TARGET)
+        self.assertIsNone(row[3])
+        self.assertEqual(row[4], provenance.MANIFEST_DECLARATION)
+
+    def test_the_direction_carries_the_locator_it_was_read_from(self):
+        # The claim has to be readable back out of the estate, or it is this
+        # tool's word for it.
+        by_source = {row[0]: row for row in self.rows()}
+        row = by_source["_rule-workbench/clean-code/nano.md"]
+        self.assertEqual(row[5], "_rule-workbench/manifest.json")
+        self.assertGreater(row[6], 0)
+        declaration = (self.estate / "ladder" / row[5]).read_text(encoding="utf-8")
+        line = declaration.splitlines()[row[6] - 1]
+        self.assertIn("input", line + declaration)
+        self.assertTrue(line.strip())
+
+    def test_the_rung_described_only_in_prose_stays_unknown(self):
+        # `refactoring`'s traceability file states the relationship in a
+        # sentence. It is the same relationship the manifest declares for
+        # `clean-code`, in the same repository, and it orders nothing.
+        by_source = {row[0]: row for row in self.rows()}
+        for path in ("_rule-workbench/refactoring/mini.md",
+                     "_rule-workbench/refactoring/nano.md"):
+            with self.subTest(path=path):
+                row = by_source[path]
+                self.assertEqual(row[2], provenance.DIRECTION_UNKNOWN)
+                self.assertEqual(row[3], provenance.NO_PRODUCER_AT_EITHER_END)
+                self.assertIsNone(row[4])
+                self.assertIsNone(row[5])
+
+    def test_the_prose_sentence_writes_no_producer_edge(self):
+        connection = store.connect(self.db, read_only=True)
+        try:
+            produced = connection.execute(
+                "SELECT source_path, target_path, evidence_path "
+                "FROM gl_context_edge WHERE relationship_kind = 'PRODUCES' "
+                "AND branch = 'main' ORDER BY target_path"
+            ).fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(produced, [(
+            "_rule-workbench/clean-code/nano.md",
+            "clean-code/clean-code.nano.md",
+            "_rule-workbench/manifest.json",
+        )])
+
+    def test_the_sentence_the_test_above_is_about_is_really_in_the_estate(self):
+        # Without this the assertion passes on an estate where nobody wrote the
+        # prose, which is not the case it is guarding.
+        text = (self.estate / "ladder" / "_rule-workbench" / "refactoring"
+                / "traceability.md").read_text(encoding="utf-8")
+        self.assertIn("../../refactoring/refactoring.md", text)
+
+    def test_every_row_carries_one_or_the_other(self):
+        for source, target, direction, reason, evidence, _, _ in self.rows():
+            with self.subTest(pair=(source, target)):
+                if direction == provenance.DIRECTION_UNKNOWN:
+                    self.assertIn(reason, provenance.DIRECTION_UNKNOWN_REASONS)
+                else:
+                    self.assertIn(direction, provenance.DIRECTIONS)
+                    self.assertIsNone(reason)
+                    self.assertIn(evidence, provenance.EVIDENCE_LADDER)
+
+
+class TestTheCountsAreNeverReportedApart(LineageTestCase):
+    """Ticket 05's rule, still binding, extended to the direction counts."""
+
+    def blocks(self, node):
+        found = []
+        if isinstance(node, dict):
+            if "pairs" in node:
+                found.append(node)
+            for child in node.values():
+                found.extend(self.blocks(child))
+        elif isinstance(node, list):
+            for child in node:
+                found.extend(self.blocks(child))
+        return found
+
+    def test_a_pair_count_never_appears_without_its_provenance_count(self):
+        reported = self.blocks(self.stats)
+        self.assertGreater(len(reported), 0)
+        for block in reported:
+            self.assertIn("pairs_with_provenance", block)
+            self.assertIn("pairs_with_a_direction", block)
+            self.assertIn("pairs_with_no_direction", block)
+
+    def test_the_direction_counts_partition_the_pairs(self):
+        for block in self.blocks(self.stats):
+            self.assertEqual(
+                block["pairs"],
+                block["pairs_with_a_direction"]
+                + sum(block["pairs_with_no_direction"].values()),
+            )
+
+    def test_every_reason_is_present_even_at_zero(self):
+        # Zero is a measurement. A reason that found nothing must read as a
+        # reason that found nothing, not as a reason nobody looked for.
+        for block in self.blocks(self.stats):
+            self.assertEqual(
+                set(block["pairs_with_no_direction"]),
+                set(provenance.DIRECTION_UNKNOWN_REASONS),
+            )
+            self.assertEqual(
+                set(block["pairs_by_direction_evidence"]),
+                set(provenance.EVIDENCE_LADDER),
+            )
+
+    def test_the_ladder_repository_reports_what_the_fixture_holds(self):
+        block = self.by_repo["ladder"]["graph"]["identical_bytes"]
+        self.assertEqual(block["pairs"], 3)
+        self.assertEqual(block["pairs_with_a_direction"], 1)
+        self.assertEqual(
+            block["pairs_by_direction_evidence"][provenance.MANIFEST_DECLARATION], 1
+        )
+        self.assertEqual(
+            block["pairs_with_no_direction"][provenance.NO_PRODUCER_AT_EITHER_END], 2
+        )
+
+    def test_a_pair_with_no_producer_is_apart_from_one_that_is_merely_unordered(self):
+        # The acceptance this ticket turns on. Both are UNKNOWN and they are
+        # different statements about the estate, so one is never read as the
+        # other.
+        block = self.by_repo["ladder"]["graph"]["identical_bytes"]
+        self.assertEqual(
+            block["pairs_with_no_direction"][provenance.PRODUCER_OUTSIDE_THE_PAIR], 0
+        )
+        self.assertNotEqual(
+            block["pairs_with_no_direction"][provenance.NO_PRODUCER_AT_EITHER_END],
+            block["pairs_with_no_direction"][provenance.PRODUCER_OUTSIDE_THE_PAIR],
+        )
+
+    def test_the_pairs_carrying_provenance_are_the_ones_a_producer_reaches(self):
+        # `pairs_with_provenance` is ticket 05's count and it does not move:
+        # what the direction adds is which of those pairs it also orders.
+        for block in self.blocks(self.stats):
+            self.assertEqual(
+                block["pairs_with_provenance"],
+                block["pairs"]
+                - block["pairs_with_no_direction"][
+                    provenance.NO_PRODUCER_AT_EITHER_END],
+            )
+
+
+class TestAProducerOutsideThePairIsReached(unittest.TestCase):
+    """The other reason, on the phase 1 estate, which already holds the shape.
+
+    ``build_estate`` is untouched and used read-only, per spec 0002 §7. Its
+    ``build/rules.md`` and ``dist/rules.md`` are the same bytes and each names
+    the same script in its own header -- a producer at both ends of the pair and
+    outside it, which orders nothing.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from build_estate import build as build_phase_one
+
+        cls.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-outside-"))
+        cls.estate = build_phase_one(cls.tmp / "estate")
+        cls.db = cls.tmp / "graph.duckdb"
+        cls.stats = index(cls.estate, db_path=cls.db)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def row(self, source, target):
+        connection = store.connect(self.db, read_only=True)
+        try:
+            return connection.execute(
+                "SELECT direction, direction_reason FROM gl_context_edge "
+                "WHERE relationship_kind = 'IDENTICAL_BYTES' "
+                "AND source_path = ? AND target_path = ?",
+                [source, target],
+            ).fetchall()
+        finally:
+            connection.close()
+
+    def test_a_pair_a_third_file_produced_is_unordered_for_that_reason(self):
+        self.assertEqual(
+            self.row("build/rules.md", "dist/rules.md"),
+            [(provenance.DIRECTION_UNKNOWN, provenance.PRODUCER_OUTSIDE_THE_PAIR)],
+        )
+
+    def test_a_pair_nothing_produced_is_unordered_for_the_other_reason(self):
+        self.assertEqual(
+            self.row("AGENTS.md", "CLAUDE.md"),
+            [(provenance.DIRECTION_UNKNOWN, provenance.NO_PRODUCER_AT_EITHER_END)],
+        )
+
+    def test_both_reasons_are_counted_in_one_estate(self):
+        block = self.stats["graph"]["identical_bytes"]
+        self.assertGreater(
+            block["pairs_with_no_direction"][provenance.PRODUCER_OUTSIDE_THE_PAIR], 0
+        )
+        self.assertGreater(
+            block["pairs_with_no_direction"][provenance.NO_PRODUCER_AT_EITHER_END], 0
+        )
+
+
+class TestThePairsAreQueryable(LineageTestCase):
+    """The demo: every pair the snapshot holds, each with a direction or why not."""
+
+    def reading(self):
+        return pairs_module.read(self.estate / "ladder", db_path=self.db)
+
+    def test_every_pair_comes_back_from_the_graph(self):
+        found = self.reading()
+        self.assertEqual(len(found.pairs), 3)
+        self.assertEqual(found.with_a_direction, 1)
+
+    def test_the_listing_names_the_direction_and_the_rung(self):
+        text = pairs_module.render(self.reading())
+        self.assertIn(provenance.MANIFEST_DECLARATION, text)
+        self.assertIn("clean-code/clean-code.nano.md", text)
+
+    def test_the_listing_names_the_reason_where_there_is_no_direction(self):
+        text = pairs_module.render(self.reading())
+        self.assertIn(provenance.DIRECTION_UNKNOWN, text)
+        self.assertIn(provenance.NO_PRODUCER_AT_EITHER_END, text)
+
+    def test_the_counts_are_in_the_same_block_as_the_listing(self):
+        text = pairs_module.render(self.reading())
+        heading = next(line for line in text.splitlines()
+                       if line.startswith("IDENTICAL BYTES"))
+        self.assertIn("3 pairs", heading)
+
+    def test_a_snapshot_with_no_index_run_says_so(self):
+        with self.assertRaises(pairs_module.PairsError):
+            pairs_module.read(self.estate / "ladder",
+                              db_path=self.tmp / "nothing.duckdb")
+
+    def test_the_output_carries_no_forbidden_word(self):
+        self.assertEqual(offending_words(pairs_module.render(self.reading())), [])
+
+
+class TestSeamB(unittest.TestCase):
+    """The command line, tested the way the comparison is run."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-directions-cli-"))
+        cls.estate = build(cls.tmp / "estate")
+        cls.db = cls.tmp / "graph.duckdb"
+        cls.orbit(["index", str(cls.estate)])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    @classmethod
+    def orbit(cls, argv):
+        return subprocess.run(
+            [sys.executable, "-m", "orbit_context.cli", *argv,
+             "--db", str(cls.db)],
+            capture_output=True, text=True, cwd=str(support.ORBIT_ROOT),
+        )
+
+    def test_the_command_prints_every_pair_with_a_direction_or_a_reason(self):
+        completed = self.orbit(["pairs", "--repo", str(self.estate / "ladder")])
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        listed = [line for line in completed.stdout.splitlines() if " = " in line]
+        self.assertEqual(len(listed), 3)
+        for line in listed:
+            self.assertTrue(
+                provenance.DIRECTION_UNKNOWN in line
+                or any(rung in line for rung in provenance.EVIDENCE_LADDER),
+                line,
+            )
+
+    def test_the_counts_travel_with_the_listing(self):
+        completed = self.orbit(["pairs", "--repo", str(self.estate / "ladder")])
+        self.assertIn("carrying provenance evidence", completed.stdout)
+        self.assertIn("carrying a direction", completed.stdout)
+
+    def test_a_repository_with_no_pairs_reports_that_rather_than_failing(self):
+        completed = self.orbit(["pairs", "--repo", str(self.estate / "vendor")])
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("0 pairs", completed.stdout)
+
+    def test_the_repository_map_reports_the_direction_beside_the_pair_count(self):
+        completed = self.orbit(["repo-map", "--repo", str(self.estate / "ladder")])
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("carrying a direction", completed.stdout)
+
+    def test_the_index_statistics_carry_it_too(self):
+        completed = self.orbit(["index", str(self.estate)])
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        block = json.loads(completed.stdout)["graph"]["identical_bytes"]
+        self.assertEqual(block["pairs_with_a_direction"], 1)
+
+    def test_neither_command_prints_a_forbidden_word(self):
+        for argv in (["pairs", "--repo", str(self.estate / "ladder")],
+                     ["repo-map", "--repo", str(self.estate / "ladder")]):
+            with self.subTest(argv=argv):
+                completed = self.orbit(argv)
+                self.assertEqual(offending_words(completed.stdout), [])
+
+
+class TestThisRepository(unittest.TestCase):
+    """The prose case, read out of the estate that wrote it.
+
+    ``_rule-workbench/refactoring/traceability.md`` says ``full.md`` *"should
+    resolve to ``../../refactoring/refactoring.md``"*. That is a producer
+    relationship stated in a sentence, and it is the one this ticket refuses to
+    promote. Asserted here against the real file rather than a copy, so that
+    rewording the sentence cannot quietly retire the test -- the same discipline
+    the ticket 05 regression case already uses.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = support.REPO_ROOT.resolve()
+        cls.scan = provenance.read_tree(cls.root, surfaces.walk_files(cls.root))
+        cls.pairs = provenance.pairs(cls.scan.contents, cls.scan.zero_byte)
+        cls.productions = provenance.strongest(cls.scan.productions)
+        cls.directions = provenance.directions(cls.pairs, cls.productions)
+        cls.summary = provenance.summary(cls.scan, cls.pairs, cls.productions)
+
+    def test_the_sentence_that_states_the_relationship_is_still_there(self):
+        text = (self.root / "_rule-workbench" / "refactoring"
+                / "traceability.md").read_text(encoding="utf-8")
+        self.assertIn("../../refactoring/refactoring.md", text)
+        self.assertIn("full.md", text)
+
+    def test_reading_it_produced_no_producer(self):
+        self.assertEqual(
+            [one.artifact_path for one in self.productions
+             if one.evidence_path.startswith("_rule-workbench/")],
+            [],
+        )
+
+    def test_every_pair_here_is_unknown_for_the_reason_that_there_is_no_producer(self):
+        # 28 pairs, every one of them a workbench file matching a published
+        # file, and every one of them UNKNOWN. The discomfort is the mechanism:
+        # nothing in this corpus declares the relationship anywhere a tool can
+        # read it, so the tool does not have it.
+        self.assertGreaterEqual(len(self.directions), 28)
+        self.assertEqual(
+            {one.reason for one in self.directions},
+            {provenance.NO_PRODUCER_AT_EITHER_END},
+        )
+
+    def test_the_two_counts_are_reported_together(self):
+        self.assertEqual(self.summary["pairs_with_a_direction"], 0)
+        self.assertEqual(
+            self.summary["pairs"],
+            self.summary["pairs_with_no_direction"][
+                provenance.NO_PRODUCER_AT_EITHER_END],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
