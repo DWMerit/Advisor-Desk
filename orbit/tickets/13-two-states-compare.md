@@ -175,3 +175,49 @@ stdout: half a table is the one shape this command must not produce.
 state that does add governance, and the same comparison reports it. A comparison
 that returned "no governance added" whatever was added would satisfy this
 ticket's headline row while measuring nothing.
+
+**The "non-`orbit/` files" row is generic, and says what it is.** It prints as
+*every directory that did not move*, totalled over every directory at delta 0
+whether or not the listing had room for it. On this run exactly one directory
+moved, so it is the ticket's row; on a run where two directories move it is the
+total of the rest, which is what the heading says and not what the ticket
+happened to need.
+
+## What the two-axis review found
+
+**The fold was folding rows it had no business folding.** Keyed on
+`(path, surface_kind)`, it took the three rows a settings file legitimately
+stands up — a row per hook, a row per MCP server — down to one, and reported a
+file folded into itself. That is the dedupe quietly changing a count, which is
+the failure this batch exists to catch, and it was invisible on Advisor-Desk
+because C0 carries no settings file. Rewritten so only a link folds, and
+`build_states` now carries a settings file holding two hooks and an MCP server
+in every state so the case is pinned at both ends of every comparison.
+
+**A pair count was reaching stdout on its own.** The `EDGES` inventory printed
+`IDENTICAL_BYTES` as a plain row, against the README's rule that the count is
+never emitted alone. It is now printed as the block `pairs.PairCounts` divides
+it into, read through `pairs.counts_from_graph` — the function that owns the
+rule — rather than counted again here.
+
+**Only three totals said which kind moved.** Governance, clauses and pointers
+arrived as single figures, against the rule that a counted section prints its
+whole inventory including its zeroes. Surfaces by kind, clauses by type and
+pointers by detector now print in full for both states.
+
+**`link_target` did not hold to its own contract.** `Path.resolve()` is not
+strict, so a link naming a file that is not there returned a path all the same,
+and the fold would then label an entry with a name this repository does not
+hold. It answers empty for that case now, checked by a stat of the name rather
+than a read of a file.
+
+**A production method existed for one test.** `State.with_detector_set_version`
+is gone; the test fakes the detector set with `dataclasses.replace`, which is
+where faking belongs. The command line's exit code for two states that are not
+comparable is now exercised at the command line rather than only in-process.
+
+Left alone, and why: `_short`, `_heading` and the snapshot clause are near-copies
+of `repo-map`'s, and extracting a shared printing module would edit a command
+this ticket has no business in. The comparison's own vocabulary lint lives in
+`test_compare.py` beside its fixture and imports the word list from
+`test_vocabulary.py`, so there is still one list.

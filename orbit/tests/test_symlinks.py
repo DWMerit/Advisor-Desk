@@ -130,6 +130,34 @@ class TestASymlinkIsANode(IndexedEstate):
         self.assertIn("docs/missing.md", self.walked)
         self.assertEqual(self.repo["processing"]["errored_files"], 0)
 
+    def test_a_link_row_carries_where_its_own_name_resolves(self):
+        """Ticket 13's column, filled by the walk that listed the link.
+
+        Read from the link and not through it, so that two names for one file
+        can be counted once later without a reader walking the tree again to
+        find out which two names those were.
+        """
+        self.assertEqual(
+            _query(
+                self.db,
+                "SELECT link_target FROM gl_context_surface "
+                "WHERE path = 'CLAUDE.md'",
+            ),
+            [("AGENTS.md",)],
+        )
+
+    def test_a_file_that_is_not_a_link_carries_no_target(self):
+        """NULL, which is a different answer from the empty string: one is a row
+        that is not a link, the other a link whose second name is not here."""
+        self.assertEqual(
+            _query(
+                self.db,
+                "SELECT link_target FROM gl_context_surface "
+                "WHERE path = 'AGENTS.md'",
+            ),
+            [(None,)],
+        )
+
     def test_a_vendor_named_link_that_names_a_rung_is_still_a_row(self):
         """The row is the point: it is a node, listed with its reason. What it
         is not is one end of a relation read out of two files."""
@@ -382,6 +410,48 @@ class TestOneWalkAndOneResolverAgree(IndexedEstate):
             f"AND target_path IN {_in(FULL_LINKS)}",
         )
         self.assertEqual({path for (path,) in landed}, FULL_LINKS)
+
+
+class TestWhereALinksNameResolves(unittest.TestCase):
+    """`surfaces.link_target`'s contract, over the four answers it can give.
+
+    Unit rather than fixture, because two of the four are cases a repository
+    holding a surface row for them would have to be built to produce: a link
+    naming nothing, and a link naming something above the repository root.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-link-target-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = self.tmp / "repo"
+        (self.root / "books").mkdir(parents=True)
+        (self.root / "books" / "refactoring.md").write_text("# OBEY\n")
+        (self.tmp / "elsewhere.md").write_text("# OBEY\n")
+        (self.root / "full.md").symlink_to("books/refactoring.md")
+        (self.root / "gone.md").symlink_to("books/nowhere.md")
+        (self.root / "outside.md").symlink_to("../elsewhere.md")
+
+    def target(self, name: str):
+        return surfaces.link_target(self.root, name)
+
+    def test_a_link_inside_the_repository_resolves_to_its_target(self):
+        self.assertEqual(self.target("full.md"), "books/refactoring.md")
+
+    def test_a_link_naming_nothing_is_empty(self):
+        # Empty, not the path it named. `resolve()` is not strict and answers
+        # for a name that is not there; folding onto that answer would label an
+        # entry with a file this repository does not hold.
+        self.assertEqual(self.target("gone.md"), "")
+
+    def test_a_link_naming_something_outside_the_repository_is_empty(self):
+        # A sibling repository is outside this snapshot, with its own branch and
+        # commit. Nothing in this snapshot can carry the fold.
+        self.assertEqual(self.target("outside.md"), "")
+
+    def test_a_file_that_is_not_a_link_has_no_target(self):
+        # None, which is a different answer from the empty string: one is a row
+        # that is not a link, the other a link whose second name is not here.
+        self.assertIsNone(self.target("books/refactoring.md"))
 
 
 if __name__ == "__main__":

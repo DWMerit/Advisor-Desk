@@ -966,6 +966,14 @@ folded is reported per state** — beside the counts, never inside them. A fold
 that happens in one state and not the other is exactly what moves a zero, and
 one summed figure would hide which state it happened in.
 
+**Only a link folds.** Rows here are additive on purpose and several of them
+legitimately stand at one path: a settings file holds a row per hook and a row
+per MCP server. A fold keyed on the path alone takes four hooks down to one and
+reports a file folded into itself — a dedupe quietly changing a count, which is
+the failure mode this whole batch exists to catch. So the rows standing at a
+name of their own and the rows whose name resolves to another are separated
+first, and only the second kind can fold away.
+
 What the fold is not: same-inode is a stronger statement than the byte identity
 `IDENTICAL_BYTES` carries. Byte-identical says *same content, cause unknown*;
 same-inode says *same file*. So the target being the surviving name is observed,
@@ -981,6 +989,21 @@ count. Recorded rather than recomputed, on `repo-map`'s rule: a second walk at
 compare time would be a second answer to "what is in this repository", taken
 against a tree that has moved on, and the difference between two states is
 exactly where that would show.
+
+### Every zero is printed here too
+
+The sections that break the counts down — surfaces by kind, clauses by type,
+pointers by detector, edges by kind, the three non-resolutions — print their
+whole inventory in both states, at zero as well as at count, for the reason
+`repo-map` does. Only the two sections whose names come from the estate
+(suffixes, top-level directories) are capped, they never cap a row that moved,
+and what they leave out is totalled into their own "did not move" row rather
+than dropped.
+
+Byte identity is printed as the block `pairs.PairCounts` divides it into —
+pairs, carrying provenance evidence, carrying none, carrying a direction —
+because a bare hash-match count over-reads and the rule that it is never emitted
+alone belongs to that function rather than to each command that prints it.
 
 ### The exit code is a finding as well as a status
 
@@ -1022,8 +1045,13 @@ FILES BY SUFFIX
   .yaml                             0        9     +9
 
 FILES BY TOP-LEVEL DIRECTORY
-  orbit                             0       52    +52
+  orbit                              0       52    +52
   every directory that did not move  201      201      0
+
+IDENTICAL BYTES
+  pairs                             28       28      0
+  carrying provenance evidence       0        0      0
+  carrying no provenance evidence   28       28      0
 ```
 
 Every row the ticket pinned by hand is reproduced: 201 files against 253, 198

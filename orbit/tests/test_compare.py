@@ -26,18 +26,26 @@ What the fixture pins, and why each row is here:
     in one state and not the other they would move the zero on their own.
 """
 
+import contextlib
+import dataclasses
+import io
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from . import support
 from .test_vocabulary import offending_words
 
-from build_states import BOOKS, GOVERNANCE, GOVERNANCE_LINK, STATES, TOOL, build
+from build_states import (
+    BOOKS, GOVERNANCE, GOVERNANCE_LINK, SETTINGS_PATH, SETTINGS_ROWS, STATES,
+    TOOL, build,
+)
 from orbit_context import compare
+from orbit_context.cli import main
 
 
 # What `c1` added, counted from the fixture's own tables rather than written
@@ -156,6 +164,36 @@ class TestTwoNamesForOneFile(StatesTestCase):
         self.assertIn(GOVERNANCE_LINK[1], text)
 
 
+class TestRowsStandingAtOnePath(StatesTestCase):
+    """Only a link folds. Several rows legitimately stand at one path."""
+
+    def test_a_settings_file_keeps_a_row_per_entry(self):
+        # Two hooks and an MCP server in one file. A fold keyed on the path
+        # would take these three down to one and report a file folded into
+        # itself -- the dedupe quietly changing a count, which is the failure
+        # mode this whole batch exists to catch.
+        state = self.tool.before
+        self.assertEqual(state.surface_rows - state.surface_files,
+                         SETTINGS_ROWS - 1)
+        self.assertIn(SETTINGS_PATH, state.surface_labels)
+
+    def test_only_a_link_is_counted_as_folded(self):
+        for state in (self.tool.before, self.tool.after):
+            self.assertEqual(state.surfaces_folded, len(BOOKS))
+            for fold in state.folds:
+                self.assertNotEqual(fold.name, fold.counted_as)
+
+
+class TestByteIdentityIsNeverCountedAlone(StatesTestCase):
+    def test_the_pair_count_arrives_with_the_counts_that_read_it(self):
+        text = compare.render(self.tool)
+        self.assertIn("carrying provenance evidence", text)
+        self.assertIn("carrying no provenance evidence", text)
+        counts = self.tool.before.pair_counts
+        self.assertEqual(counts.total,
+                         counts.with_provenance + counts.without_provenance)
+
+
 class TestTheStatesAreComparable(StatesTestCase):
     def test_both_states_carry_the_same_detector_set(self):
         self.assertEqual(
@@ -169,9 +207,14 @@ class TestTheStatesAreComparable(StatesTestCase):
                       compare.render(self.tool))
 
     def test_states_read_by_different_detector_sets_are_not_comparable(self):
+        # Faked here rather than in the code under test: what the comparison
+        # does about two detector sets is a property of the comparison, and a
+        # production method whose only caller is a test is a worse way to say so.
         moved = compare.Comparison(
             before=self.tool.before,
-            after=self.tool.after.with_detector_set_version("1.000000000000"),
+            after=dataclasses.replace(
+                self.tool.after, detector_set_version="1.000000000000"
+            ),
             database_path=str(self.db),
         )
         self.assertFalse(moved.comparable)
@@ -239,6 +282,22 @@ class TestTheCommandLine(unittest.TestCase):
         self.assertIn("files walked", result.stdout)
         self.assertIn("governance surfaces", result.stdout)
         self.assertIn(".md", result.stdout)
+
+    def test_the_exit_code_says_when_the_states_are_not_comparable(self):
+        # The command line's own wiring, with the reading faked: two states read
+        # by different detector sets cannot arise from one run of this build,
+        # and the exit code that reports them still has to be the one the
+        # command returns.
+        printed = io.StringIO()
+        with mock.patch.object(
+            compare, "compare_text", return_value=("a table\n", False)
+        ), contextlib.redirect_stdout(printed):
+            code = main(["compare", STATES[0], STATES[1],
+                         "--repo", str(self.repo), "--db", str(self.db)])
+        # The table still prints. Every figure in it was measured; what is not
+        # established is that subtracting them means anything.
+        self.assertEqual(printed.getvalue(), "a table\n")
+        self.assertEqual(code, compare.EXIT_NOT_COMPARABLE)
 
     def test_the_exit_code_says_when_a_state_could_not_be_read(self):
         result = self.run_compare(STATES[0], "no-such-commit")

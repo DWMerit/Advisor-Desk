@@ -66,7 +66,8 @@ from pathlib import Path
 
 import duckdb
 
-from . import detectors, ladders, pointers, provenance, store
+from . import clauses, detectors, ladders, pairs, pointers, provenance, store
+from . import surfaces
 from .indexer import CONTAINS_EDGE, REFERENCES_EDGE, index
 from .workspace import Repository, git_info
 
@@ -87,7 +88,13 @@ EXAMPLE_ROWS = 3
 
 # Zero rows carried in a per-name section before the rest are summarised. Every
 # row that moved is always printed: a cap that could hide a delta would be a cap
-# on the finding rather than on the output.
+# on the finding rather than on the output, and what the cap leaves out is
+# totalled into the section's own "did not move" row rather than dropped.
+#
+# It bites only on the two sections whose names come from the estate -- suffixes
+# and top-level directories. Every other section here is a fixed inventory of
+# what these detectors look for, all of them shorter than this, and those print
+# whole including their zeroes.
 ZERO_ROWS = 12
 
 # How wide a path or a state label is printed before it is cut.
@@ -152,34 +159,34 @@ class State:
     detector_set_version: str
 
     files_walked: int = 0
-    # Distinct names after the fold, and so **not** the run row's own
-    # `files_with_surface_kind`: that one counts a link and the file it names as
-    # two. One table cannot carry a folded count and an unfolded one under two
-    # headings and expect a reader to tell which is which.
-    files_with_surface_kind: int = 0
     files_by_suffix: dict[str, int] = field(default_factory=dict)
     files_by_directory: dict[str, int] = field(default_factory=dict)
 
+    # Distinct names after the fold, and so **not** the run row's own
+    # `files_with_surface_kind`: that one counts a link and the file it names as
+    # two. Named apart from the column for that reason -- one table cannot carry
+    # a folded count and an unfolded one under two headings and expect a reader
+    # to tell which is which.
+    surface_files: int = 0
     surface_rows: int = 0
     surfaces_read_in_full: int = 0
     surface_bytes: int = 0
+    surfaces_by_kind: dict[str, int] = field(default_factory=dict)
     surfaces_folded: int = 0
     folds: tuple[Fold, ...] = ()
     surface_labels: frozenset[str] = frozenset()
 
     clauses: int = 0
+    clauses_by_type: dict[str, int] = field(default_factory=dict)
     pointers: int = 0
+    pointers_by_subtype: dict[str, int] = field(default_factory=dict)
     edges_by_kind: dict[str, int] = field(default_factory=dict)
     external_refs_by_sub_kind: dict[str, int] = field(default_factory=dict)
-
-    def with_detector_set_version(self, version: str) -> "State":
-        """The same reading, labelled with another detector set.
-
-        Here so the incomparable case can be exercised without a second build of
-        the detectors: what the comparison does about it is a property of the
-        comparison, not of the detector set that provoked it.
-        """
-        return replace(self, detector_set_version=version)
+    # Byte identity, read through `pairs.counts_from_graph` -- the function that
+    # owns the rule that a pair count is never emitted alone. The block it
+    # divides into is printed here whole, so a hash-match count cannot reach
+    # stdout from this command without the counts that make it readable.
+    pair_counts: pairs.PairCounts = field(default_factory=pairs.PairCounts)
 
 
 @dataclass(frozen=True)
@@ -207,8 +214,7 @@ class Comparison:
         return [
             Row("files walked", self.before.files_walked, self.after.files_walked),
             Row("files carrying a surface kind, folded",
-                self.before.files_with_surface_kind,
-                self.after.files_with_surface_kind),
+                self.before.surface_files, self.after.surface_files),
             self.surfaces(),
             Row("of those, read in full",
                 self.before.surfaces_read_in_full,
@@ -232,6 +238,18 @@ class Comparison:
     def directories(self) -> dict[str, Row]:
         return _tally_rows(self.before.files_by_directory,
                            self.after.files_by_directory)
+
+    def surface_kinds(self) -> dict[str, Row]:
+        return _tally_rows(self.before.surfaces_by_kind,
+                           self.after.surfaces_by_kind)
+
+    def clause_types(self) -> dict[str, Row]:
+        return _tally_rows(self.before.clauses_by_type,
+                           self.after.clauses_by_type)
+
+    def pointer_subtypes(self) -> dict[str, Row]:
+        return _tally_rows(self.before.pointers_by_subtype,
+                           self.after.pointers_by_subtype)
 
     def edges(self) -> dict[str, Row]:
         return _tally_rows(self.before.edges_by_kind, self.after.edges_by_kind)
@@ -279,7 +297,15 @@ _SURFACE_SQL = (
     f"FROM gl_context_surface WHERE {_SNAPSHOT} ORDER BY path"
 )
 
-_CLAUSE_SQL = f"SELECT count(*) FROM gl_context_clause WHERE {_SNAPSHOT}"
+_CLAUSE_SQL = (
+    "SELECT clause_type, count(*) "
+    f"FROM gl_context_clause WHERE {_SNAPSHOT} GROUP BY 1"
+)
+
+_POINTER_SQL = (
+    "SELECT subtype, count(*) FROM gl_context_edge "
+    f"WHERE relationship_kind = '{REFERENCES_EDGE}' AND {_SNAPSHOT} GROUP BY 1"
+)
 
 _EDGE_SQL = (
     "SELECT relationship_kind, count(*) "
@@ -292,8 +318,13 @@ _EXTERNAL_SQL = (
 )
 
 
-def read_state(connection, found: Repository, label: str) -> State:
-    """Read one indexed snapshot back out of the graph, folded."""
+def read_state(connection, found: Repository, label: str,
+               db_path: str | Path = "") -> State:
+    """Read one indexed snapshot back out of the graph, folded.
+
+    ``db_path`` is carried only so that a store whose columns predate this build
+    is named with the file the reader would have to migrate.
+    """
     snapshot = [found.project_id, found.branch, found.commit_sha]
     try:
         run = connection.execute(_RUN_SQL, snapshot).fetchall()
@@ -302,10 +333,8 @@ def read_state(connection, found: Repository, label: str) -> State:
             f"the graph holds no gl_context_run table: {error}"
         ) from None
     except duckdb.BinderException as error:
-        # A store written before these columns existed. Named rather than
-        # silently read as zero: a tally that is absent and a tally that is
-        # empty are different findings, and one of them is a repository with no
-        # files in it.
+        # A store whose columns predate this build: the tally is not there to
+        # read. Named for the same reason the check below names an empty one.
         raise CompareError(
             f"the graph predates this build: {error}; "
             f"re-index both states, or run `orbit-context migrate`"
@@ -335,7 +364,6 @@ def read_state(connection, found: Repository, label: str) -> State:
         files_walked=int(files_walked),
         files_by_suffix=_tally(by_suffix),
         files_by_directory=_tally(by_directory),
-        clauses=int(connection.execute(_CLAUSE_SQL, snapshot).fetchone()[0] or 0),
         edges_by_kind={
             kind: int(count)
             for kind, count in connection.execute(_EDGE_SQL, snapshot).fetchall()
@@ -346,12 +374,54 @@ def read_state(connection, found: Repository, label: str) -> State:
             in connection.execute(_EXTERNAL_SQL, snapshot).fetchall()
         },
     )
-    # Read off the edge tally rather than counted a second time: a pointer is a
-    # REFERENCES edge, and two queries for one number is two numbers.
-    state = replace(state, pointers=state.edges_by_kind.get(REFERENCES_EDGE, 0))
+    clauses_by_type = _zero_filled(
+        clauses.CLAUSE_TYPES, connection.execute(_CLAUSE_SQL, snapshot).fetchall()
+    )
+    pointers_by_subtype = _zero_filled(
+        pointers.SUBTYPES, connection.execute(_POINTER_SQL, snapshot).fetchall()
+    )
+    state = replace(
+        state,
+        clauses=sum(clauses_by_type.values()),
+        clauses_by_type=clauses_by_type,
+        # Read off the edge tally rather than counted a second time: a pointer
+        # is a REFERENCES edge, and two queries for one number is two numbers.
+        pointers=state.edges_by_kind.get(REFERENCES_EDGE, 0),
+        pointers_by_subtype=pointers_by_subtype,
+        # The pair count and the counts that make it readable, from the one
+        # function that owns both.
+        pair_counts=_pair_counts(connection, snapshot, db_path),
+    )
     return _folded(
         state, connection.execute(_SURFACE_SQL, snapshot).fetchall()
     )
+
+
+def _pair_counts(connection, snapshot: list, db_path) -> pairs.PairCounts:
+    """Byte identity, from the function that owns "never counted alone".
+
+    `pairs` raises its own error for a store whose columns predate this build
+    and names the command that resolves it; it is re-raised here so the command
+    line handles it the way it handles everything else a state cannot be read
+    for.
+    """
+    try:
+        return pairs.counts_from_graph(connection, snapshot, db_path=db_path)
+    except pairs.PairsError as error:
+        raise CompareError(str(error)) from None
+
+
+def _zero_filled(inventory, counted) -> dict[str, int]:
+    """One tally, every name this tool looks for present even at zero.
+
+    A value read off a row that this build has no name for is added rather than
+    dropped: a vocabulary this build has not seen is a finding, not a row to
+    throw away.
+    """
+    tally = {name: 0 for name in inventory}
+    for name, count in counted:
+        tally[name] = tally.get(name, 0) + int(count)
+    return tally
 
 
 def _tally(serialised: str | None) -> dict[str, int]:
@@ -367,49 +437,90 @@ def _tally(serialised: str | None) -> dict[str, int]:
     return {str(name): int(count) for name, count in loaded.items()}
 
 
+@dataclass(frozen=True)
+class _Entry:
+    """One surface row, in the four fields the fold and the counts need."""
+
+    path: str
+    kind: str
+    reason: str
+    size_bytes: int
+
+    @property
+    def read_in_full(self) -> bool:
+        return self.reason == ""
+
+
 def _folded(state: State, rows: list[tuple]) -> State:
-    """Fold two names for one file, keeping the target's name.
+    """Fold a name that resolves to another name, keeping the target's.
 
-    Grouped by ``(the path the name resolves to, surface_kind)``. The kind is
-    part of the key because rows here are additive on purpose -- a hook script
-    is a hook target *and* whatever else it is -- and folding across kinds would
-    turn that record into one argument about which it really is.
+    **Only a link folds.** Rows are additive here on purpose and several of them
+    legitimately stand at one path: a settings file holds a row per hook and a
+    row per MCP server, and a fold keyed on the path would take four hooks down
+    to one and report a file folded into itself. So the two populations are
+    separated first -- rows standing at a name of their own, and rows whose name
+    resolves to another -- and only the second can be folded away.
 
-    The surviving row is the one standing at the target's own path where the
-    snapshot holds it, so what the count carries is the file's own size rather
-    than the link's 32 bytes. Where the snapshot holds no row at that path --
-    a link naming a file that is not itself a surface -- the link's own row
-    survives, under the target's name.
+    A link folds onto ``(the path it names, its own kind)`` where the snapshot
+    holds a row standing there. The kind is part of that because rows are
+    additive: a hook script is a hook target *and* whatever else it is, and
+    folding across kinds would turn that record into one argument about which it
+    really is.
+
+    Where nothing stands at the target -- a link naming a file that is not
+    itself a surface -- the link's own row survives under the target's name, and
+    a second link naming the same file folds onto that one. Its ``size_bytes``
+    is then the link's own, which is what a node nobody opened weighs.
     """
-    groups: dict[tuple[str, str], list[tuple]] = {}
+    standing: list[_Entry] = []
+    links: list[tuple[_Entry, str]] = []
     for path, kind, link_target, reason, size in rows:
-        groups.setdefault((link_target or path, kind), []).append(
-            (path, reason, int(size or 0))
-        )
+        entry = _Entry(path, kind, reason, int(size or 0))
+        if link_target:
+            links.append((entry, link_target))
+        else:
+            standing.append(entry)
 
+    at = {(entry.path, entry.kind) for entry in standing}
+    unmatched: dict[tuple[str, str], _Entry] = {}
     folds: list[Fold] = []
-    read_in_full = 0
-    total_bytes = 0
-    for (canonical, _kind), members in sorted(groups.items()):
-        kept = next(
-            (member for member in members if member[0] == canonical), members[0]
-        )
-        read_in_full += 1 if kept[1] == "" else 0
-        total_bytes += kept[2]
-        folds.extend(
-            Fold(member[0], canonical) for member in members if member is not kept
-        )
-    labels = frozenset(canonical for canonical, _ in groups)
+    for entry, target in links:
+        key = (target, entry.kind)
+        if key in at or key in unmatched:
+            folds.append(Fold(entry.path, target))
+            continue
+        unmatched[key] = entry
+
+    kept = standing + list(unmatched.values())
+    labels = (
+        frozenset(entry.path for entry in standing)
+        | frozenset(target for target, _ in unmatched)
+    )
     return replace(
         state,
-        files_with_surface_kind=len(labels),
-        surface_rows=len(groups),
-        surfaces_read_in_full=read_in_full,
-        surface_bytes=total_bytes,
-        surfaces_folded=len(rows) - len(groups),
+        surface_files=len(labels),
+        surface_rows=len(kept),
+        surfaces_read_in_full=sum(1 for entry in kept if entry.read_in_full),
+        surface_bytes=sum(entry.size_bytes for entry in kept),
+        surfaces_by_kind=_by_kind(kept),
+        surfaces_folded=len(folds),
         folds=tuple(sorted(folds, key=lambda fold: fold.name)),
         surface_labels=labels,
     )
+
+
+def _by_kind(kept: list[_Entry]) -> dict[str, int]:
+    """Surfaces per kind, every kind this tool has present even at zero.
+
+    Printed in full for the reason `repo-map` prints every zero: a listing of
+    only the kinds that moved reads as a description of the estate, and a column
+    of zeroes reads as what it is -- the inventory of what these detectors look
+    for.
+    """
+    tally = {kind: 0 for kind in surfaces.SURFACE_KINDS}
+    for entry in kept:
+        tally[entry.kind] = tally.get(entry.kind, 0) + 1
+    return tally
 
 
 # --- Materialising a state -------------------------------------------------
@@ -463,7 +574,7 @@ def read_ref(repo_root: Path, ref: str, db_path: str | Path,
         found = git_info(tree)
     connection = store.connect(db_path, read_only=True)
     try:
-        return read_state(connection, found, label=ref)
+        return read_state(connection, found, label=ref, db_path=db_path)
     finally:
         connection.close()
 
@@ -521,7 +632,7 @@ def _table(rows: list[Row], before: str, after: str, indent: str = "  ") -> list
     return lines
 
 
-def _named(rows: dict[str, Row], rename=None) -> list[Row]:
+def _listed(rows: dict[str, Row], rename=None) -> list[Row]:
     """Every row that moved, then the rows that did not, capped.
 
     A row at zero is worth printing -- "this directory did not move" is half of
@@ -625,7 +736,7 @@ def _by_name(comparison: Comparison, title: str, summary: str,
     three statements about what a detector set could not see, and one total
     would say none of them.
     """
-    listed = _named(rows, rename)
+    listed = _listed(rows, rename)
     if still:
         listed = listed + [_still(rows, still)]
     lines = [
@@ -673,6 +784,33 @@ def _closing(comparison: Comparison) -> list[str]:
     return lines
 
 
+def _identical_bytes(comparison: Comparison) -> list[str]:
+    """Byte identity, printed as the block rather than as a count.
+
+    A bare hash-match count over-reads badly, so the README's rule is that it is
+    never emitted alone: it is reported with the count of pairs carrying
+    provenance evidence and the count carrying none. That rule is a property of
+    `pairs.PairCounts`, which is where these four figures come from, rather than
+    a habit this file has to remember.
+    """
+    before, after = comparison.before.pair_counts, comparison.after.pair_counts
+    rows = [
+        Row("pairs", before.total, after.total),
+        Row("carrying provenance evidence",
+            before.with_provenance, after.with_provenance),
+        Row("carrying no provenance evidence",
+            before.without_provenance, after.without_provenance),
+        Row("carrying a direction",
+            before.with_a_direction, after.with_a_direction),
+    ]
+    return [
+        _heading("IDENTICAL BYTES", "pairs, and what evidences them",
+                 comparison.before.detector_set_version),
+        *_table(rows, comparison.before.label, comparison.after.label),
+        "  Whether two identical files are intentionally identical stays UNKNOWN.",
+    ]
+
+
 def render(comparison: Comparison) -> str:
     """The comparison as text."""
     lines = _header(comparison)
@@ -688,11 +826,18 @@ def render(comparison: Comparison) -> str:
         still="every directory that did not move",
     )
     lines += _folds(comparison)
+    lines += _by_name(comparison, "SURFACES BY KIND", "which governance moved",
+                      comparison.surface_kinds())
+    lines += _by_name(comparison, "CLAUSES BY TYPE", "by Markdown structure alone",
+                      comparison.clause_types())
+    lines += _by_name(comparison, "POINTERS BY DETECTOR", "what each one reads",
+                      comparison.pointer_subtypes())
     lines += _by_name(comparison, "EDGES", "by kind", _edge_rows(comparison))
     lines += _by_name(
         comparison, "ADDRESSES THAT DID NOT RESOLVE", "never merged",
         _external_rows(comparison),
     )
+    lines += _identical_bytes(comparison)
     lines += _closing(comparison)
     return "\n".join(lines) + "\n"
 

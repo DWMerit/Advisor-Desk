@@ -509,21 +509,29 @@ def files_by_directory(walked_files: list[WalkedFile]) -> dict[str, int]:
 def link_target(repo_root: Path, relative_path: str) -> str | None:
     """Where a link's own name resolves, repository-relative, or None.
 
-    Read from the link, never through it: ``readlink`` and a path calculation,
-    with no read of the file the link names. A symlink is a node this walk lists
-    and never opens, and that holds here too.
+    Canonicalised the way GitLab canonicalises a collected path
+    (``crates/orbit-local/src/commands/setup.rs:265-271``): ``resolve()``, which
+    follows this link and any link in the directories above it. What it never
+    does is **open** the file the link names -- a symlink is a node this walk
+    lists and never reads, and that holds here.
 
-    Empty rather than None where the row *is* a link and its target is outside
-    the repository or is not there: those are links whose second name this
-    repository does not hold, and folding them onto a path outside the snapshot
-    would put a file in the count that no row of it covers. None is the answer
-    for a row that is not a link at all.
+    Empty rather than None in the three cases where a link's second name is not
+    a file this snapshot holds -- the target lands outside the repository, or is
+    not there at all. Folding onto either would label an entry with a path no
+    row of this snapshot covers, which is a name invented by the fold. None is
+    the answer for a row that is not a link.
     """
     absolute = repo_root / relative_path
     try:
         if not absolute.is_symlink():
             return None
         resolved = absolute.resolve()
+        # ``resolve()`` is not strict, so a link naming nothing still returns a
+        # path. Asking whether that path is there is a stat of the name, not a
+        # read of a file: what the walk refuses to do to a link is load its
+        # bytes.
+        if not resolved.exists():
+            return ""
     except OSError:
         return None
     try:

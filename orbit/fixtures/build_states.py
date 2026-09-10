@@ -17,6 +17,11 @@ tag so a test names a state the way the command line does:
     that has no tool in it yet, so the fold is exercised at both ends of the
     comparison rather than only at the end that grew.
 
+    It also carries a settings file holding two hooks and an MCP server: three
+    surface rows standing at one path, which a fold keyed on the path alone
+    would take down to one. Present in every state, so the case is in both ends
+    of every comparison this fixture supports.
+
 ``c1``
     ``c0`` plus a tool directory -- Python, a README, tickets and a spec -- and
     one edited line in a file that already existed. **It adds no governance.**
@@ -144,6 +149,43 @@ NOT_GOVERNANCE = {
 
 BINARY = "assets/logo.png"
 
+# One settings file holding three entries: two hook definitions and one MCP
+# server. Present in every state, and here for one reason -- three surface rows
+# stand at one path, which is the shape a fold keyed on the path alone folds
+# away. Two names for one file is a link naming another file; three entries
+# inside one settings file is not, and a comparison that folded them would take
+# a governance count down by two and call it a name.
+#
+# Both commands are found on PATH rather than in the tree, so neither adds a
+# `hook-target` row: what this fixture is for is the rows at one path.
+SETTINGS = """{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {"type": "command", "command": "true"}
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {"type": "command", "command": "echo the rung this workflow can afford"}
+        ]
+      }
+    ]
+  },
+  "mcpServers": {
+    "book-notes": {"command": "npx", "args": ["-y", "notes-server"]}
+  }
+}
+"""
+
+# What that file holds, counted from the file rather than written down twice.
+SETTINGS_PATH = ".claude/settings.json"
+SETTINGS_ROWS = 3
+
 # --- c1: a tool, and no governance ----------------------------------------
 #
 # Eight files, every one of them under `tool/`. Four are Markdown, so the
@@ -238,6 +280,7 @@ def _build_c0(root: Path) -> None:
     for relative, target in WORKBENCH_LINKS.items():
         _link(root / relative, target)
     _write(root / "CLAUDE.md", ROOT_INSTRUCTIONS)
+    _write(root / SETTINGS_PATH, SETTINGS)
     (root / Path(BINARY).parent).mkdir(parents=True, exist_ok=True)
     (root / BINARY).write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(range(64)))
 
