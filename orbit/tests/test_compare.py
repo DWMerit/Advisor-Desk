@@ -424,6 +424,23 @@ class TestWhatTheWalkWeighed(ThreeStatesTestCase):
             self.assertNotIn(word, text, word)
 
 
+class TestAStateHoldingNoFiles(unittest.TestCase):
+    """A section with no rows still prints a figure per state.
+
+    A state at an empty commit has no suffixes and no directories, so the two
+    sections whose names come from the estate have nothing to list. The row
+    that totals what did not move is still owed a zero per state: a row
+    carrying no figures at all is the half-a-table shape this command must not
+    produce.
+    """
+
+    def test_the_row_that_totals_what_did_not_move_carries_a_zero_per_state(self):
+        self.assertEqual(
+            compare._still({}, "every suffix that did not move", 3).values,
+            (0, 0, 0),
+        )
+
+
 class TestHowAStateIsNamed(unittest.TestCase):
     """Seam A for the argument shape: `ref`, or `path@ref`."""
 

@@ -928,7 +928,7 @@ def _counts(comparison: Comparison) -> list[str]:
     ]
 
 
-def _still(rows: dict[str, Row], name: str) -> Row:
+def _still(rows: dict[str, Row], name: str, states: int) -> Row:
     """One row totalling every name that did not move.
 
     The ticket this was built for asks for exactly this figure -- "files outside
@@ -939,14 +939,8 @@ def _still(rows: dict[str, Row], name: str) -> Row:
     """
     still = [row for row in rows.values() if not row.moved]
     return Row(name, tuple(
-        sum(row.values[column] for row in still)
-        for column in range(_columns(rows))
+        sum(row.values[column] for row in still) for column in range(states)
     ))
-
-
-def _columns(rows: dict[str, Row]) -> int:
-    """How many states these rows were read from, taken off the rows."""
-    return len(next(iter(rows.values())).values) if rows else 0
 
 
 def _by_name(comparison: Comparison, title: str, summary: str,
@@ -957,10 +951,14 @@ def _by_name(comparison: Comparison, title: str, summary: str,
     section whose rows must never be summed -- the three non-resolutions are
     three statements about what a detector set could not see, and one total
     would say none of them.
+
+    The number of columns comes from the comparison rather than from the rows,
+    so a section with no rows in it -- a state holding no files has no suffixes
+    -- still prints a zero per state instead of a row with no figures on it.
     """
     listed = _listed(rows, rename)
     if still:
-        listed = listed + [_still(rows, still)]
+        listed = listed + [_still(rows, still, len(comparison.states))]
     lines = [
         _heading(title, summary, comparison.before.detector_set_version),
         *_table(listed, _labels(comparison)),
