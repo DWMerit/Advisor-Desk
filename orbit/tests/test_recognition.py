@@ -57,7 +57,14 @@ class TestRecognition(unittest.TestCase):
 
     def test_a_repository_with_no_vendor_name_is_no_longer_empty(self):
         # The finding this ticket exists for: phase 1 returned 0 here.
-        self.assertEqual(self.by_repo["ladder"]["graph"]["surfaces"], 16)
+        #
+        # 16 when ticket 10 wrote this. Ticket 11 put three more declared files
+        # in the fixture -- `clean-code/clean-code.md`,
+        # `clean-code/clean-code.nano.md` and `drafts/takeoff.mini.md`, a book
+        # at two rungs and a rung word with no base rung -- and the three are
+        # what this number moved by. Reconciled against the named files rather
+        # than re-baselined.
+        self.assertEqual(self.by_repo["ladder"]["graph"]["surfaces"], 19)
 
     def test_the_ladder_is_recognised_rung_by_rung(self):
         found = {
@@ -76,7 +83,11 @@ class TestRecognition(unittest.TestCase):
             self.by_repo["ladder"]["graph"]["recognition"],
             {
                 surfaces.RECOGNITION_VENDOR_NAME: 0,
-                surfaces.RECOGNITION_DECLARED_MARKER: 14,
+                # 14 at ticket 10, plus the three files ticket 11 added. Each
+                # opens with a directive heading, so all three arrive by
+                # declaration and the inferred count is unmoved -- which is the
+                # half of this split that matters.
+                surfaces.RECOGNITION_DECLARED_MARKER: 17,
                 surfaces.RECOGNITION_CORPUS_ADJACENT: 2,
             },
         )
@@ -177,12 +188,15 @@ class TestTheTwoPathsDoNotInterfere(unittest.TestCase):
         })
 
     def test_the_estate_total_is_the_two_repositories(self):
-        self.assertEqual(self.stats["graph"]["surfaces"], 25)
+        # 25 and 17 at ticket 10; the three files ticket 11 added to the ladder
+        # repository are the whole difference, and the vendor repository is
+        # untouched at 6 and 3.
+        self.assertEqual(self.stats["graph"]["surfaces"], 28)
         self.assertEqual(
             self.stats["graph"]["recognition"],
             {
                 surfaces.RECOGNITION_VENDOR_NAME: 6,
-                surfaces.RECOGNITION_DECLARED_MARKER: 17,
+                surfaces.RECOGNITION_DECLARED_MARKER: 20,
                 surfaces.RECOGNITION_CORPUS_ADJACENT: 2,
             },
         )
@@ -259,7 +273,7 @@ class TestSeamB(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         statistics = json.loads(completed.stdout)
-        self.assertEqual(statistics["graph"]["surfaces"], 25)
+        self.assertEqual(statistics["graph"]["surfaces"], 28)
         self.assertEqual(
             statistics["graph"]["recognition"][surfaces.RECOGNITION_CORPUS_ADJACENT], 2
         )

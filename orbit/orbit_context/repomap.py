@@ -47,7 +47,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import detectors, history, pointers, provenance, store, surfaces
+from . import detectors, history, ladders, pointers, provenance, store, surfaces
 from .clauses import CLAUSE_TYPES
 from .retrieve import RetrievalError, repository
 
@@ -67,7 +67,17 @@ EXAMPLE_ROWS = 5
 MAX_TEXT_WIDTH = 64
 
 # The edge kinds this domain writes, listed at zero as well as at count.
-EDGE_KINDS = ("CONTAINS", "REFERENCES", "IDENTICAL_BYTES", "PRODUCES")
+# Sourced from the modules that own them where one does, so that a rename
+# reaches this inventory. A kind missing from here is printed only when the
+# graph happens to hold one, which is the zero-filled inventory failing at
+# exactly the estate it exists for.
+EDGE_KINDS = (
+    "CONTAINS",
+    "REFERENCES",
+    provenance.IDENTICAL_BYTES_EDGE,
+    provenance.PRODUCES_EDGE,
+    ladders.RUNG_OF_EDGE,
+)
 
 
 class RepoMapError(Exception):
@@ -117,6 +127,11 @@ class RepoMap:
     pairs_with_provenance: int = 0
     produces_by_evidence: dict[str, int] = field(default_factory=dict)
     pair_examples: list[tuple[str, str, str]] = field(default_factory=list)
+    # The ladders this snapshot holds, and the rung words that reach none of
+    # them. Read through `ladders.from_graph`, so the map and the `ladder`
+    # command answer the same question once rather than twice.
+    ladders: list[ladders.Ladder] = field(default_factory=list)
+    rungs_with_no_base_rung: list[str] = field(default_factory=list)
 
     branch_state: history.BranchState | None = None
 
@@ -273,6 +288,10 @@ def _read_graph(connection, snapshot: list, result: RepoMap) -> None:
             connection, _PAIR_EXAMPLE_SQL, snapshot, [EXAMPLE_ROWS]
         )
     ]
+
+    result.ladders, result.rungs_with_no_base_rung = ladders.from_graph(
+        connection, snapshot
+    )
 
 
 def _snapshot(alias: str = "") -> str:
@@ -550,6 +569,22 @@ def _identical(result: RepoMap, examples: bool) -> list[str]:
     return lines
 
 
+def _ladders(result: RepoMap, examples: bool) -> list[str]:
+    """Progressive disclosure, where the estate built it by hand.
+
+    Bounded by construction: one row per distinct ladder height, of which there
+    are at most as many as a ladder can have rungs, and a capped listing of the
+    rung words that reached no ladder -- dropped entirely, like every other
+    listing here, when the map has already exceeded its budget once.
+    """
+    return ladders.summary_lines(
+        result.ladders, result.rungs_with_no_base_rung,
+        result.graph_detector_version,
+        limit=EXAMPLE_ROWS if examples else 0,
+        shorten=_short,
+    )
+
+
 def _git(result: RepoMap) -> list[str]:
     state = result.branch_state
     lines = ["\nGIT  (git state, not a detector finding)"]
@@ -611,6 +646,7 @@ def _body(result: RepoMap, examples: bool) -> str:
     lines += _pointers(result)
     lines += _external(result)
     lines += _identical(result, examples)
+    lines += _ladders(result, examples)
     lines += _git(result)
     return "\n".join(lines) + "\n"
 

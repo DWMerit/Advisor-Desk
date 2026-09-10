@@ -11,9 +11,15 @@ Two repositories, side by side, because the two recognition paths have to be
 shown not to interfere:
 
 ``ladder``
-    The clone-lineage shape. A book directory of three rungs, a rule workbench,
-    a documentation tree, and a directory that declares itself only in part.
+    The clone-lineage shape. A book directory of three rungs, a second book at
+    two, a rung word with no base rung beside it, a rule workbench, a
+    documentation tree, and a directory that declares itself only in part.
     No vendor-named file anywhere in it -- phase 1 finds nothing here at all.
+
+    The workbench names its rungs ``mini.md`` and ``nano.md``, with no stem in
+    front of them. That is the second naming shape this one repository uses,
+    and the ladder rule does not key on it -- which is here to be asserted
+    rather than to be discovered later on a repository nobody has looked at.
 ``vendor``
     The shape phase 1 was built for: ``CLAUDE.md``, ``AGENTS.md``, an agent
     definition. Its ``CLAUDE.md`` also opens with a directive heading, which is
@@ -59,6 +65,32 @@ LADDER = {
     ),
     "refactoring/refactoring.nano.md": _rules(
         "Refactoring", "- Preserve observable behaviour; move in small steps."
+    ),
+}
+
+# A second book, at two rungs rather than three. Not a defect and not a gap:
+# how many rungs a book carries is an observation, and a ladder of two is
+# reported as two. It is here so the count is exercised at a height other than
+# the one every book in this estate happens to share.
+SHORT_LADDER = {
+    "clean-code/clean-code.md": _rules(
+        "Clean Code",
+        "- A function does one thing, at one level of abstraction.\n"
+        "- A name that needs a comment is a name that has not been chosen.\n"
+        "- Leave the code cleaner than the state it was found in.",
+    ),
+    "clean-code/clean-code.nano.md": _rules(
+        "Clean Code", "- One thing per function; name it so no comment is needed."
+    ),
+}
+
+# A rung word with no base rung beside it. The name says `mini`, and nothing in
+# the directory is named by the stem alone, so there is no second end for an
+# edge and no ladder to walk. Counted and named rather than dropped: a rung the
+# estate wrote and this tool could not attach is not the same as no rung.
+UNATTACHED_RUNG = {
+    "drafts/takeoff.mini.md": _rules(
+        "Takeoff", "- Count from the marked-up set, never from the schedule alone."
     ),
 }
 
@@ -160,7 +192,7 @@ def build(destination: str | Path | None = None) -> Path:
 
 def _build_ladder(root: Path) -> None:
     """A repository whose governance carries no vendor name anywhere."""
-    for relative, text in LADDER.items():
+    for relative, text in {**LADDER, **SHORT_LADDER, **UNATTACHED_RUNG}.items():
         _write(root / relative, text)
 
     for book in WORKBENCH_BOOKS:

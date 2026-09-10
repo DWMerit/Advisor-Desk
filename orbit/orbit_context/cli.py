@@ -1,10 +1,11 @@
 """``orbit-context`` — the context-domain indexer for Orbit's local graph.
 
-Four commands. ``index`` writes the graph; ``migrate`` brings an existing store
+Five commands. ``index`` writes the graph; ``migrate`` brings an existing store
 to the ontology when the two have parted; ``show`` reads one clause back out of
 the file it came from, at the byte offsets the graph recorded; ``repo-map``
 prints one repository's governance surface, read from the graph, inside a stated
-budget.
+budget; ``ladder`` walks the ``RUNG_OF`` edges of one book and prints its rungs
+in size order.
 
 ``show`` writes the clause's bytes to stdout and nothing else, so what comes out
 is the span of the file and can be compared to it byte for byte; the locator
@@ -17,7 +18,7 @@ import argparse
 import json
 import sys
 
-from . import history, repomap, retrieve, store
+from . import history, ladders, repomap, retrieve, store
 from .indexer import index, migrate
 from .ontology import OntologyError
 from .store import StoreError
@@ -124,6 +125,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
         help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
     )
+
+    ladder_parser = subparsers.add_parser(
+        "ladder",
+        help="Print a book's rungs with their byte counts, in size order",
+    )
+    ladder_parser.add_argument(
+        "name", nargs="?", default=None,
+        help="The book to print: its stem, its directory, or the base rung's "
+             "path. Omitted, every ladder in the snapshot is printed.",
+    )
+    ladder_parser.add_argument(
+        "--repo", dest="repo", default=".",
+        help="A path inside the repository to read (default: the working "
+             "directory). Its git state selects the indexed snapshot.",
+    )
+    ladder_parser.add_argument(
+        "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
+        help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
+    )
     return parser
 
 
@@ -198,6 +218,16 @@ def main(argv: list[str] | None = None) -> int:
                 session=args.session, budget=args.budget,
             ), end="")
         except (repomap.RepoMapError, StoreError, GitError,
+                retrieve.RetrievalError) as error:
+            print(f"orbit-context: {error}", file=sys.stderr)
+            return 1
+        return 0
+
+    if args.command == "ladder":
+        try:
+            print(ladders.ladder(args.repo, db_path=args.db_path, name=args.name),
+                  end="")
+        except (ladders.LadderError, StoreError, GitError,
                 retrieve.RetrievalError) as error:
             print(f"orbit-context: {error}", file=sys.stderr)
             return 1

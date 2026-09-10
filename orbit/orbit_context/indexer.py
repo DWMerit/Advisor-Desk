@@ -11,6 +11,7 @@ from pathlib import Path
 
 from . import clauses as clause_module
 from . import detectors
+from . import ladders as ladder_module
 from . import ontology as ontology_module
 from . import pointers as pointer_module
 from . import provenance as provenance_module
@@ -38,6 +39,10 @@ CONTAINS_EDGE = "CONTAINS"
 REFERENCES_EDGE = "REFERENCES"
 IDENTICAL_BYTES_EDGE = provenance_module.IDENTICAL_BYTES_EDGE
 PRODUCES_EDGE = provenance_module.PRODUCES_EDGE
+# Spelled once, in the module that reads these edges back. Two spellings of an
+# edge type is a rename that half applies, and the half that did not leaves
+# `ladder` and `repo-map` reporting zero with nothing raised.
+RUNG_OF_EDGE = ladder_module.RUNG_OF_EDGE
 
 # Orbit's own node type. A pointer landing on a file that is not a governance
 # surface points at a row in their `gl_file`, in their database -- so the edge
@@ -74,6 +79,10 @@ class RepoResult:
     # statement about a file and the third is this tool's reading of a
     # directory, and a total says which is which about none of them.
     recognition: dict = field(default_factory=dict)
+    # The ladders found, and the rungs that could not be attached to one.
+    # Reported together for the reason the pair count is reported beside its
+    # provenance: a ladder count on its own cannot say what it missed.
+    ladders: dict = field(default_factory=dict)
     # The walk, and how much of it these detectors recognise anything in.
     files_walked: int = 0
     files_with_surface_kind: int = 0
@@ -325,6 +334,71 @@ def _produces_edges(edge: EdgeType, repo: Repository,
     ]
 
 
+def _rung_edges(edge: EdgeType, repo: Repository,
+                whole_file_surfaces: dict[str, int]) -> tuple[list[dict], list[str]]:
+    """One edge per rung whose base rung is a surface in the same repository.
+
+    The relation is read off two filenames, so both ends have to be surfaces
+    this run already found: a rung of something that is not governance is not a
+    ladder this graph can be asked about.
+
+    A rung word whose base rung is not there writes no edge -- an edge needs
+    both ends, and inventing the missing one would put a file in the graph the
+    repository does not hold. It is returned instead, so that a rung the estate
+    wrote and this tool could not attach does not read as a rung never written.
+    """
+    rows: list[dict] = []
+    without_a_base: list[str] = []
+    for path in sorted(whole_file_surfaces):
+        named = surfaces.rung_of(path)
+        if named is None:
+            continue
+        base_path, rung = named
+        base_id = whole_file_surfaces.get(base_path)
+        if base_id is None:
+            without_a_base.append(path)
+            continue
+        rows.append(
+            _edge_row(
+                edge, repo, whole_file_surfaces[path], SURFACE_NODE,
+                base_id, SURFACE_NODE,
+                subtype=rung,
+                source_path=path,
+                target_path=base_path,
+            )
+        )
+    return rows, without_a_base
+
+
+def _ladder_tally(rung_edges: list[dict], without_a_base: list[str]) -> dict:
+    """The ladders those edges make up, with every figure present at zero.
+
+    A ladder is one base rung and the rungs pointing at it, so its height is the
+    edges into it plus the base rung itself. How many rungs a book carries is an
+    observation: a book at two is reported as two, beside the books at three,
+    and never as a book missing one.
+    """
+    rungs_by_base: dict[str, int] = {}
+    for row in rung_edges:
+        base = row["target_path"]
+        rungs_by_base[base] = rungs_by_base.get(base, 0) + 1
+    heights: dict[int, int] = {}
+    for count in rungs_by_base.values():
+        heights[count + 1] = heights.get(count + 1, 0) + 1
+    return {
+        "found": len(rungs_by_base),
+        "rungs": sum(count + 1 for count in rungs_by_base.values()),
+        # Keyed by string because JSON has no other kind of key, and ordered by
+        # the number it spells: sorted as text, a ladder of ten rungs sorts
+        # before one of two, and the extension point this module documents is
+        # adding rung words.
+        "ladders_by_rung_count": {
+            str(height): heights[height] for height in sorted(heights)
+        },
+        "rungs_with_no_base_rung": len(without_a_base),
+    }
+
+
 def _pointer_edges(edge: EdgeType, external_node: NodeType, repo: Repository,
                    surface_row: dict, surface_path: str,
                    found: tuple, spans: list[tuple[int, int, int]],
@@ -493,6 +567,7 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     references = ontology.edges[REFERENCES_EDGE]
     identical_bytes = ontology.edges[IDENTICAL_BYTES_EDGE]
     produces = ontology.edges[PRODUCES_EDGE]
+    rung_of = ontology.edges[RUNG_OF_EDGE]
 
     result = RepoResult(
         repository=repo.name,
@@ -542,6 +617,8 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
             _count(result, note.relative_path, note.reason, note.detail, note.errored)
 
     whole_file = _whole_file_surfaces(rows)
+    rung_rows, rungs_without_a_base = _rung_edges(rung_of, repo, whole_file)
+    edge_rows.extend(rung_rows)
     external_rows: dict[int, dict] = {}
     counts: dict[str, int] = {sub_kind: 0 for sub_kind in pointer_module.SUB_KINDS}
     pointer_rows: list[dict] = []
@@ -561,6 +638,7 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     edge_rows.extend(_identical_byte_edges(identical_bytes, repo, matched))
     edge_rows.extend(_produces_edges(produces, repo, productions))
 
+    result.ladders = _ladder_tally(rung_rows, rungs_without_a_base)
     result.recognition = _recognition_tally(rows.values())
     result.files_walked = len(walked)
     # Distinct paths, not rows. A settings file is one file however many hooks
@@ -632,6 +710,29 @@ def _recognition_tally(rows) -> dict:
         if value in tally:
             tally[value] += 1
     return tally
+
+
+def _ladder_totals(results: list[RepoResult]) -> dict:
+    """The same tally across every repository this run indexed.
+
+    The heights are merged key by key rather than summed into one number: two
+    repositories with two ladders each, one at three rungs and one at two, is
+    four ladders and two heights, and a total would say neither.
+    """
+    heights: dict[int, int] = {}
+    for result in results:
+        for height, count in result.ladders.get("ladders_by_rung_count", {}).items():
+            heights[int(height)] = heights.get(int(height), 0) + count
+    return {
+        "found": sum(result.ladders.get("found", 0) for result in results),
+        "rungs": sum(result.ladders.get("rungs", 0) for result in results),
+        "ladders_by_rung_count": {
+            str(height): heights[height] for height in sorted(heights)
+        },
+        "rungs_with_no_base_rung": sum(
+            result.ladders.get("rungs_with_no_base_rung", 0) for result in results
+        ),
+    }
 
 
 def _recognition_totals(results: list[RepoResult]) -> dict:
@@ -780,6 +881,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
             "identical_bytes": provenance_module.totals(
                 [result.identical_bytes for result in results]
             ),
+            "ladders": _ladder_totals(results),
         },
         "coverage": _coverage_totals(results),
         "processing": {
@@ -819,6 +921,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                     "pointers": result.pointers,
                     "external_refs": dict(result.external_refs),
                     "identical_bytes": dict(result.identical_bytes),
+                    "ladders": dict(result.ladders),
                 },
                 "coverage": _coverage(result.files_walked,
                                       result.files_with_surface_kind),

@@ -130,6 +130,55 @@ CORPUS_MINIMUM_FILES = 3
 # well under the share, but the guard is not left to that margin.
 CORPUS_MINIMUM_DEPTH = 1
 
+# --- The ladder ------------------------------------------------------------
+#
+# This repository implements progressive disclosure by hand, fourteen times: one
+# book at three sizes, so a session loads the rung its workflow can afford.
+#
+#     refactoring/refactoring.md       17,866 bytes
+#     refactoring/refactoring.mini.md   5,167
+#     refactoring/refactoring.nano.md   1,986
+#
+# What relates those three files is their names, and only their names. So the
+# rule is a table of the rung words that have been observed, and the relation it
+# produces says what the names say and stops there -- not that the nano rung was
+# derived from the full one. Spec 0001 s14 keeps "whether two identical files
+# are intentionally identical" a permanent UNKNOWN, and a derivation nothing
+# observed would be the same over-read. Where the estate evidences one, PRODUCES
+# carries it.
+#
+# **The convention is this repository's, not a standard.** Nobody defined
+# `.mini.md` the way Anthropic defined `CLAUDE.md`. A repository naming its
+# rungs otherwise has no ladders *found* by this rule, which is not the same
+# statement as no ladders, and every command that prints a count prints the rule
+# beside it. The table is the extension point, and adding a word to it moves the
+# detector set version on its own.
+#
+# One repository already carries a second shape: `_rule-workbench/<book>/` holds
+# `mini.md` and `nano.md` with no stem in front of them, so the directory is the
+# book and the filename is the rung alone. That shape is *not* keyed on here.
+# Reaching it means a rule that reads a directory rather than a name, which is
+# the corpus rule's kind of inference rather than this one's, and it would put
+# the workbench's rungs and the published rungs in one count under one word
+# without saying which was read how.
+RUNG_WORDS = ("mini", "nano")
+
+# The suffix a rung carries. A ladder is Markdown; a directory of source files
+# named the same way is not one.
+RUNG_SUFFIX = ".md"
+
+# Built from the table above, so a word added there reaches the pattern and the
+# detector version together. The stem is required to be non-empty: a file named
+# `mini.md` is named for the rung alone, which is the workbench's shape and not
+# this one.
+_RUNG_NAME = re.compile(
+    r"^(?P<stem>.+)\.(?P<rung>"
+    + "|".join(RUNG_WORDS)
+    + r")"
+    + re.escape(RUNG_SUFFIX)
+    + r"$"
+)
+
 # What the `recognition` column carries -- how the tool came to call this a
 # surface, which a `surface_kind` alone cannot say.
 RECOGNITION_VENDOR_NAME = "vendor-name"
@@ -381,6 +430,27 @@ def declares_directive(text: str) -> bool:
     rule file, this project's own tickets included.
     """
     return _DIRECTIVE_HEADING.match(first_heading(text)) is not None
+
+
+def rung_of(relative_path: str) -> tuple[str, str] | None:
+    """The base rung this filename names, and the rung word it carries.
+
+    ``refactoring/refactoring.mini.md`` returns
+    ``("refactoring/refactoring.md", "mini")``: the file in the same directory
+    named by the stem alone, and the word that told us so. None where the name
+    carries no rung word.
+
+    Naming the base rung is not the same as finding it. Whether that file is in
+    the tree, and whether it is a surface, is the caller's question -- a
+    relation needs both ends, and inventing the missing one would put a file in
+    the graph that the repository does not hold.
+    """
+    posix = PurePosixPath(relative_path)
+    match = _RUNG_NAME.match(posix.name)
+    if match is None:
+        return None
+    base = posix.with_name(match.group("stem") + RUNG_SUFFIX).as_posix()
+    return base, match.group("rung")
 
 
 def _scan_head(path: Path) -> str:

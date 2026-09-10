@@ -62,6 +62,15 @@ Or read the whole repository at once, before doing anything else:
 orbit/bin/orbit-context repo-map --repo /path/to/the/repository
 ```
 
+Or ask one book for its ladder — every rung it was written at, largest first:
+
+```sh
+orbit/bin/orbit-context ladder refactoring --repo /path/to/the/repository
+
+# Every ladder in the repository.
+orbit/bin/orbit-context ladder --repo /path/to/the/repository
+```
+
 Then query it with Orbit's own CLI, pointed at our file:
 
 ```sh
@@ -692,6 +701,89 @@ what is half the number. Where none resolves, the count is stated as not
 measured rather than guessed. The block is labelled as git state, not a detector
 finding: it is the one part of the map that is not an observation of the estate's
 governance surface.
+
+## The ladder
+
+Progressive disclosure of rules, built here by hand before Orbit existed: one
+book written three times at three sizes, so a session loads the rung its
+workflow can afford.
+
+```
+refactoring/refactoring.md       17866
+refactoring/refactoring.mini.md   5167
+refactoring/refactoring.nano.md   1986
+```
+
+`RUNG_OF` is the edge between them, from the rung to the **base rung** — the
+file in the same directory named by the stem alone. Every rung of one ladder
+carries that path in `target_path`, so the base rung is the ladder's address and
+a ladder is one walk of these edges. The rung word the filename carried is on
+the row as `subtype`.
+
+The base rung is never a `RUNG_OF` *source* — the edges leave the other rungs
+and enter it — so it is unioned in rather than joined to, or a book comes back
+one rung short of itself:
+
+```sh
+orbit local sql "SELECT r.ladder, s.path, s.size_bytes, r.rung
+                 FROM (SELECT target_path AS ladder, source_path AS path, subtype AS rung,
+                              project_id, branch, commit_sha
+                         FROM gl_context_edge WHERE relationship_kind = 'RUNG_OF'
+                       UNION
+                       SELECT target_path, target_path, 'base',
+                              project_id, branch, commit_sha
+                         FROM gl_context_edge WHERE relationship_kind = 'RUNG_OF') r
+                 JOIN gl_context_surface s
+                   ON s.path = r.path AND s.project_id = r.project_id
+                  AND s.branch = r.branch AND s.commit_sha = r.commit_sha
+                 ORDER BY r.ladder, s.size_bytes DESC"
+```
+
+The join carries the whole snapshot — `project_id`, `branch` and `commit_sha` —
+because the graph holds every snapshot ever indexed. Joined on the path alone,
+a store holding two commits of one repository returns each rung twice, once at
+a size taken from the other commit.
+
+### What the edge says, and what it does not
+
+It relates **two filenames**, in one directory, and nothing else. It does not
+say the nano rung was derived from the full one: spec 0001 §14 keeps "whether
+two identical files are intentionally identical" a permanent UNKNOWN, and a
+derivation nothing observed would be the same over-read. Where the estate
+evidences one, the `PRODUCES` edges beside these rows carry it.
+
+**Which rung a session actually loaded is not here.** That needs the load
+ledger, which is Candidate A and still gated. Every command that prints a ladder
+prints it as UNKNOWN with the reason named, never as zero — spec 0001 §9's rule
+that an unobservable quantity must not improve a number by being unobservable.
+
+### What the rule keys on
+
+A file named `<stem>.md` beside `<stem>.mini.md` or `<stem>.nano.md`, in one
+directory. `RUNG_WORDS` in `surfaces.py` is the table, and adding a word to it
+moves the detector set version on its own.
+
+That convention is **this repository's, not a standard** — nobody defined
+`.mini.md` the way Anthropic defined `CLAUDE.md`. So a repository naming its
+rungs otherwise has no ladders **found** here, which is not the same statement
+as no ladders, and the rule is printed beside every count including zero.
+
+This repository already carries a second shape it is deliberately not keyed on:
+`_rule-workbench/<book>/` holds `mini.md` and `nano.md` with no stem in front,
+so the directory is the book and the filename is the rung alone. Reaching that
+means a rule that reads a directory rather than a name, which is the corpus
+rule's kind of inference rather than this one's.
+
+### A rung with no base rung
+
+A filename can carry a rung word with nothing beside it named by the stem alone.
+No edge is written — an edge needs both ends, and inventing the missing one
+would put a file in the graph the repository does not hold — so it is counted
+and named instead, as `rungs_with_no_base_rung`. A rung the estate wrote and
+this tool could not attach is not the same as a rung never written.
+
+How many rungs a book carries is an observation, not a defect. A book at two is
+reported at two, beside the books at three.
 
 ## Statistics
 
