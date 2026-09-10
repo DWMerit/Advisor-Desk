@@ -105,6 +105,14 @@ All of `00-phase-1.md` still applies — the vocabulary constraint, no prose
 columns, ontology YAML before Python, tests ship with the ticket, never open
 GitLab Orbit's file for writing. Added for this batch:
 
+- **On resuming after a clear or a restart, run `repo-map` before describing
+  state.** Branch, commits ahead, and which of them carry this session's
+  `Claude-Session` trailer are read off disk, not recalled. A context window is
+  not a record of what was done: work committed and pushed fifteen minutes
+  earlier has already been described in this project as having "no record",
+  which was a statement about memory phrased as one about the repository.
+  Ticket 06 built the command for exactly this moment; reaching for ad-hoc
+  `git log` instead is how the wrong sentence gets written.
 - **Recognition must reconcile by hand.** Against the table above, naming files,
   not just producing a number.
 - **The acceptance run is evidence, never a test assertion.** Tests that read
@@ -122,6 +130,6 @@ GitLab Orbit's file for writing. Added for this batch:
 - **Seams, both agreed:** Seam A is `build_*(estate) → index(estate, db_path) →
   assert on the stats dict and `gl_context_*` rows`. Seam B is the command line.
   No third seam without going back to the spec.
-- **Fixtures: new builders, `build_estate` untouched.** 269 tests assert against
+- **Fixtures: new builders, `build_estate` untouched.** 415 tests assert against
   it, many on absolute counts. Re-baselining them risks switching off a test that
   was catching something.
