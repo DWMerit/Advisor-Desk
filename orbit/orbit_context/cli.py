@@ -7,8 +7,9 @@ prints one repository's surfaces, read from the graph, inside a stated
 budget; ``ladder`` walks the ``RUNG_OF`` edges of one book and prints its rungs
 in size order; ``pairs`` prints every byte-identical pair with the direction its
 evidence supports, or an explicit UNKNOWN and the reason there is none;
-``compare`` indexes two states of one repository and prints the difference
-between them, with both states' own figures beside every delta.
+``compare`` indexes two or more states -- of one repository, or of several
+sharing a base -- and prints each one's difference from the first, with every
+state's own figures beside every delta.
 
 Exit codes carry findings as well as failures. ``show`` returns 2 for an
 ambiguous address and 3 for an index the file has moved on from; ``compare``
@@ -172,21 +173,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     compare_parser = subparsers.add_parser(
         "compare",
-        help="Index two states of one repository and print the difference, "
-             "with both states' own figures beside every delta",
+        help="Index two or more states and print the difference against the "
+             "first, with every state's own figures beside every delta",
     )
     compare_parser.add_argument(
-        "before", help="The state differenced from: any git ref or commit",
-    )
-    compare_parser.add_argument(
-        "after", help="The state differenced to: any git ref or commit",
+        "states", nargs="+",
+        help="Two or more states. The first is the baseline every other one is "
+             "differenced against. A state is a git ref or commit in --repo, "
+             "or 'path@ref' for a state of another repository — the path is "
+             "read only where it names a directory that is there, so a ref "
+             "carrying an '@' of its own keeps its text.",
     )
     compare_parser.add_argument(
         "--repo", dest="repo", default=".",
-        help="A path inside the repository holding both states (default: the "
-             "working directory). Each state is checked out into a detached "
-             "worktree beside it and indexed there, so the working tree is "
-             "never checked out over.",
+        help="A path inside the repository a state is looked for in when it "
+             "names none of its own (default: the working directory). Every "
+             "state is cloned to a detached checkout of its own commit and "
+             "indexed there, so no working tree is checked out over and no "
+             "repository a state came from is written to.",
     )
     compare_parser.add_argument(
         "--ontology", dest="ontology_root", default=None,
@@ -297,12 +301,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "compare":
         try:
             report, comparable = compare_module.compare_text(
-                args.repo, args.before, args.after,
+                args.repo, *args.states,
                 db_path=args.db_path, ontology_root=args.ontology_root,
             )
         except (compare_module.CompareError, OntologyError, StoreError,
                 GitError) as error:
-            # Nothing on stdout. A comparison that could not read one of its two
+            # Nothing on stdout. A comparison that could not read one of its
             # states has no table to print, and half a table is the one output
             # shape this command must never produce.
             print(f"orbit-context: {error}", file=sys.stderr)

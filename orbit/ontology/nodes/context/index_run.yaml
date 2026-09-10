@@ -126,6 +126,13 @@ properties:
     mutable: false
     description: "Distinct file paths carrying at least one surface row. Distinct paths rather than rows, because a settings file holds a row per hook and would otherwise count several times against a denominator of files. Subtracted from files_walked, this is how many files these detectors recognise nothing in."
 
+  bytes_walked:
+    type: int64
+    source: bytes_walked
+    nullable: false
+    mutable: false
+    description: "What the same walk weighed, in bytes, each entry taken by lstat so a symlink weighs its own name and never the file it names. The denominator in the other unit: fourteen files can be a corpus or a line each, and a count of files says which of those a repository is about as well as a count of pages says how long a book is. Written by the walk that produced files_walked, because a second pass to weigh the tree would weigh a tree that has moved on."
+
   files_walked_by_suffix:
     type: string
     source: files_walked_by_suffix
@@ -157,6 +164,7 @@ storage:
     - {name: excluded_directories, type: "String", codec: ["ZSTD(3)"]}
     - {name: files_walked, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: files_with_surface_kind, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: bytes_walked, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: files_walked_by_suffix, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: files_walked_by_directory, type: "String", default: "''", codec: ["ZSTD(3)"]}
   indexes:

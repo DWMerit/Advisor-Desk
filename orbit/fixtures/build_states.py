@@ -264,7 +264,7 @@ def _commit(root: Path, message: str, tag: str) -> None:
     _git(root, "tag", tag)
 
 
-def _build_c0(root: Path) -> None:
+def _build_c0(root: Path, resolve_links: bool = False) -> None:
     """The corpus, untouched."""
     for relative, text in {**PUBLISHED, **NOT_GOVERNANCE}.items():
         _write(root / relative, text)
@@ -278,7 +278,18 @@ def _build_c0(root: Path) -> None:
     for relative, text in WORKBENCH_PROSE.items():
         _write(root / relative, text)
     for relative, target in WORKBENCH_LINKS.items():
-        _link(root / relative, target)
+        if resolve_links:
+            # The same name, holding a copy of the file it used to name. A
+            # repository that did this to its own base is no longer tracking
+            # the source, whatever its diff says, and the two shapes are told
+            # apart by what the names weigh rather than by what they are
+            # called -- which is the question the comparison has to be able to
+            # answer from its rows.
+            _write(root / relative,
+                   (root / relative).parent.joinpath(target).read_text(
+                       encoding="utf-8"))
+        else:
+            _link(root / relative, target)
     _write(root / "CLAUDE.md", ROOT_INSTRUCTIONS)
     _write(root / SETTINGS_PATH, SETTINGS)
     (root / Path(BINARY).parent).mkdir(parents=True, exist_ok=True)
@@ -314,8 +325,16 @@ def _workbench_rung(book: str, rung: str) -> str:
     return _rules(book, f"- The {rung} rung of {book}, kept decision-equivalent.")
 
 
-def build(destination: str | Path | None = None) -> Path:
-    """Create the repository at all three states and return its root."""
+def build(destination: str | Path | None = None,
+          resolve_links: bool = False) -> Path:
+    """Create the repository at all three states and return its root.
+
+    ``resolve_links`` builds the same three states with every ``full.md``
+    holding a copy of the book it names instead of naming it. Same corpus, same
+    names, same file count -- and a base that no longer tracks its source. It
+    is the other answer to the question a comparison of two repositories has to
+    settle before its deltas can be read as the same kind of measurement.
+    """
     root = (
         Path(destination)
         if destination
@@ -326,7 +345,7 @@ def build(destination: str | Path | None = None) -> Path:
     _git(root, "config", "user.email", "fixture@example.invalid")
     _git(root, "config", "user.name", "Fixture")
 
-    _build_c0(root)
+    _build_c0(root, resolve_links=resolve_links)
     _commit(root, "the corpus", STATES[0])
     _build_c1(root)
     _commit(root, "a tool, and no governance", STATES[1])
@@ -337,3 +356,4 @@ def build(destination: str | Path | None = None) -> Path:
 
 if __name__ == "__main__":
     print(build(sys.argv[1] if len(sys.argv) > 1 else None))
+

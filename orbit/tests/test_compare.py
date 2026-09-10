@@ -211,9 +211,11 @@ class TestTheStatesAreComparable(StatesTestCase):
         # does about two detector sets is a property of the comparison, and a
         # production method whose only caller is a test is a worse way to say so.
         moved = compare.Comparison(
-            before=self.tool.before,
-            after=dataclasses.replace(
-                self.tool.after, detector_set_version="1.000000000000"
+            states=(
+                self.tool.before,
+                dataclasses.replace(
+                    self.tool.after, detector_set_version="1.000000000000"
+                ),
             ),
             database_path=str(self.db),
         )
@@ -244,6 +246,25 @@ class TestTheComparisonLeavesTheRepositoryAlone(StatesTestCase):
         self.assertEqual(len(listed.stdout.strip().splitlines()), 1,
                          listed.stdout)
 
+    def test_the_repository_a_state_came_from_was_not_written_to(self):
+        """Not "left tidy" -- not written to at all.
+
+        A state can come from a repository this project is allowed to read and
+        not to touch, and `git worktree add` writes to the repository it is run
+        in. So the comparison clones instead, and what that buys is checked
+        here rather than asserted in a docstring: every path under `.git`, and
+        what each one holds, is the same after a comparison as before it.
+        """
+        def git_directory() -> dict:
+            return {
+                str(path.relative_to(self.repo)): path.stat().st_mtime_ns
+                for path in sorted((self.repo / ".git").rglob("*"))
+            }
+
+        before = git_directory()
+        _compare(self.repo, STATES[0], STATES[2], self.db)
+        self.assertEqual(git_directory(), before)
+
 
 class TestTheOutput(StatesTestCase):
     def test_it_carries_no_word_from_the_constrained_vocabulary(self):
@@ -254,6 +275,181 @@ class TestTheOutput(StatesTestCase):
         text = compare.render(self.tool)
         self.assertIn(self.tool.before.commit_sha[:12], text)
         self.assertIn(self.tool.after.commit_sha[:12], text)
+
+
+class ThreeStatesTestCase(unittest.TestCase):
+    """Ticket 14's shape: two repositories descended from one base.
+
+    ``lineage`` is the repository whose own history carries the three states.
+    ``sibling`` is a second repository built from the same builder -- the same
+    corpus, the same names -- standing for a clone that went its own way. A
+    third, ``rewritten``, is that same sibling with every ``full.md`` holding a
+    copy of the book it used to name: same corpus, same file count, a base that
+    no longer tracks its source.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-three-"))
+        cls.lineage = build(cls.tmp / "lineage")
+        cls.sibling = build(cls.tmp / "sibling")
+        cls.rewritten = build(cls.tmp / "rewritten", resolve_links=True)
+        cls.db = cls.tmp / "graph.duckdb"
+        cls.three = compare.compare(
+            cls.lineage, STATES[0], STATES[1], f"{cls.sibling}@{STATES[2]}",
+            db_path=cls.db,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+
+class TestThreeStates(ThreeStatesTestCase):
+    def test_every_state_carries_its_own_figures(self):
+        for row in self.three.rows():
+            self.assertEqual(len(row.values), 3, row.name)
+
+    def test_every_delta_is_taken_against_the_baseline(self):
+        # Not a chain. `C2 - C1` is a subtraction between two states that never
+        # shared anything but a base, and reporting it would read as a session
+        # having done what a whole second repository did.
+        for row in self.three.rows():
+            self.assertEqual(
+                row.deltas,
+                (row.values[1] - row.values[0], row.values[2] - row.values[0]),
+                row.name,
+            )
+
+    def test_the_table_prints_a_column_per_state_and_a_delta_per_state(self):
+        lines = compare.render(self.three).splitlines()
+        counts = [n for n, line in enumerate(lines) if line.startswith("COUNTS")][0]
+        heading = lines[counts + 1]
+        for state in self.three.states:
+            self.assertIn(state.label[:10], heading)
+        # Two deltas, each named for the state it was taken from. One column
+        # headed "delta" twice would be two subtractions the reader has to
+        # work out from their order.
+        self.assertEqual(heading.count("-" + STATES[0]), 2, heading)
+
+    def test_a_state_of_another_repository_is_labelled_by_that_repository(self):
+        sibling = self.three.states[2]
+        self.assertEqual(sibling.label, f"sibling@{STATES[2]}")
+        self.assertEqual(sibling.origin, str(self.sibling))
+        self.assertIn(str(self.sibling), compare.render(self.three))
+
+    def test_the_output_says_the_states_are_not_all_one_repository(self):
+        # A delta between two repositories measures only what their shared base
+        # makes it, and a table that looked identical either way would let a
+        # reader take one for the other.
+        self.assertIn("not all from one repository",
+                      compare.render(self.three))
+        two = compare.compare(self.lineage, STATES[0], STATES[1], db_path=self.db)
+        self.assertNotIn("not all from one repository", compare.render(two))
+
+    def test_it_carries_no_word_from_the_constrained_vocabulary(self):
+        self.assertEqual(offending_words(compare.render(self.three)), [])
+
+
+class TestWhetherAStateRewroteItsBase(ThreeStatesTestCase):
+    """The question asked of the rows, and answered either way.
+
+    Fourteen links weighing 32 bytes each, or fourteen files weighing what the
+    books weigh. After the fold both read as fourteen names counted once, so
+    the answer has to come from the link count and what the links weigh.
+    """
+
+    def _states(self, sibling: Path) -> compare.Comparison:
+        return compare.compare(
+            self.lineage, STATES[0], f"{sibling}@{STATES[0]}", db_path=self.db,
+        )
+
+    def test_a_base_that_is_intact_carries_the_same_links(self):
+        intact = self._states(self.sibling)
+        self.assertEqual(intact.before.link_rows, len(BOOKS))
+        self.assertEqual(intact.after.link_rows, len(BOOKS))
+        self.assertEqual(intact.before.link_bytes, intact.after.link_bytes)
+
+    def test_a_base_whose_links_were_resolved_says_so_in_the_rows(self):
+        rewritten = self._states(self.rewritten)
+        self.assertEqual(rewritten.before.link_rows, len(BOOKS))
+        self.assertEqual(rewritten.after.link_rows, 0)
+        self.assertEqual(rewritten.after.link_bytes, 0)
+        # And the fold that used to happen does not: the names are files now.
+        self.assertEqual(rewritten.after.surfaces_folded, 0)
+        self.assertGreater(rewritten.after.surface_bytes,
+                           rewritten.before.surface_bytes)
+
+    def test_the_file_count_alone_does_not_tell_the_two_apart(self):
+        # Which is why the link rows are printed. The walk reaches the same
+        # names in the same number, and a comparison reading only that figure
+        # would report the two repositories as the same one.
+        rewritten = self._states(self.rewritten)
+        self.assertEqual(rewritten.before.files_walked,
+                         rewritten.after.files_walked)
+        self.assertEqual(rewritten.before.files_by_directory,
+                         rewritten.after.files_by_directory)
+
+    def test_both_figures_are_printed_per_state(self):
+        text = compare.render(self._states(self.rewritten))
+        self.assertIn("names that resolve to another name", text)
+        self.assertRegex(text, r"names resolving to another name, \d+ bytes")
+
+
+class TestWhatTheWalkWeighed(ThreeStatesTestCase):
+    """Bytes walked, so a share of them can be stated as an observation.
+
+    Nothing here computes a share, sets a threshold or raises anything on one:
+    spec 0002 s11 refuses a metric built for a hypothesis before the hypothesis
+    was measured. What the table owes a reader is the two figures the share is
+    read off, in every state, beside each other.
+    """
+
+    def test_the_bytes_the_walk_weighed_are_reported_per_state(self):
+        row = [row for row in self.three.rows() if row.name == "bytes walked"][0]
+        self.assertEqual(len(row.values), 3)
+        for value in row.values:
+            self.assertGreater(value, 0)
+
+    def test_the_surface_bytes_sit_inside_the_bytes_walked(self):
+        for state in self.three.states:
+            self.assertLess(state.surface_bytes, state.bytes_walked)
+
+    def test_no_share_is_computed_and_nothing_is_ranked(self):
+        # Spec 0002 s11 refuses a metric built for a hypothesis before the
+        # hypothesis was measured. The two figures are printed; dividing them
+        # is a reading somebody takes, not a number this tool stands behind.
+        text = compare.render(self.three).lower()
+        for word in ("%", "ratio", "threshold", "per cent", "percent"):
+            self.assertNotIn(word, text, word)
+
+
+class TestHowAStateIsNamed(unittest.TestCase):
+    """Seam A for the argument shape: `ref`, or `path@ref`."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-spec-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_a_bare_ref_is_read_in_the_default_repository(self):
+        spec = compare.parse_state("a7d7649", self.tmp)
+        self.assertEqual((spec.repo, spec.ref, spec.label),
+                         (self.tmp.resolve(), "a7d7649", "a7d7649"))
+
+    def test_a_path_that_is_there_names_another_repository(self):
+        other = self.tmp / "other"
+        other.mkdir()
+        spec = compare.parse_state(f"{other}@782a886", self.tmp)
+        self.assertEqual((spec.repo, spec.ref), (other.resolve(), "782a886"))
+        self.assertEqual(spec.label, "other@782a886")
+
+    def test_a_ref_carrying_an_at_sign_keeps_its_own_text(self):
+        # `main@{yesterday}` is a ref. Splitting on the character alone would
+        # take it apart and then report the repository it invented as one that
+        # could not be read.
+        spec = compare.parse_state("main@{yesterday}", self.tmp)
+        self.assertEqual(spec.ref, "main@{yesterday}")
+        self.assertEqual(spec.repo, self.tmp.resolve())
 
 
 class TestTheCommandLine(unittest.TestCase):
@@ -307,6 +503,33 @@ class TestTheCommandLine(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertIn("no-such-commit", result.stderr)
+
+    def test_three_states_run_from_the_command_line(self):
+        # Seam B for ticket 14's shape: two states of this repository and one
+        # of another, named the way a person types it.
+        sibling = build(self.tmp / "sibling")
+        result = self.run_compare(
+            STATES[0], STATES[1], f"{sibling}@{STATES[2]}"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"sibling@{STATES[2]}", result.stdout)
+        self.assertIn(str(sibling), result.stdout)
+        self.assertRegex(result.stdout, r"(?m)^\s*surfaces\s+\d+\s+\d+\s+\d+\s")
+
+    def test_one_state_is_not_a_comparison(self):
+        result = self.run_compare(STATES[0])
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("two states", result.stderr)
+
+    def test_a_state_of_a_repository_that_is_not_there_names_it(self):
+        # A path that is not there is not a repository, so the whole text stays
+        # a ref -- and the message names what was typed rather than a
+        # repository or a ref the reader never wrote.
+        result = self.run_compare(STATES[0], "/no/such/repository@c0")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("/no/such/repository@c0", result.stderr)
 
 
 if __name__ == "__main__":

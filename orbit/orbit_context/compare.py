@@ -1,26 +1,52 @@
-"""Two states of one repository, indexed and differenced.
+"""Two or more states, indexed and differenced.
 
-A comparison is two indexes plus subtraction. Nothing here acquires a store of
+A comparison is N indexes plus subtraction. Nothing here acquires a store of
 its own, an index path of its own or a query language of its own -- spec 0002
 s12 lists each of those as a kill condition, and each of them would mean the
 figures in this table were taken differently from the figures every other
 command prints.
 
-So: each state is materialised with ``git worktree add --detach``, indexed
-through the same ``index`` every other run uses, read back out of the same
-graph, and subtracted here.
+So: each state is materialised as a detached checkout of its own commit,
+indexed through the same ``index`` every other run uses, read back out of the
+same graph, and subtracted here.
 
-Both states are read from a commit
-----------------------------------
+Every delta is against the first state
+--------------------------------------
+
+Not a chain. Three states of one lineage are an untouched base and two
+descendants of it, and ``C2 - C1`` is a subtraction between two repositories
+that never shared anything but that base -- reported as a delta it would read
+as one session having done what a whole second repository did. The baseline is
+the only state all of them share, so it is the only one all of them are
+differenced against.
+
+Where the states are not all one repository the header says so. What a delta
+between two repositories measures is only what their shared base makes it, and
+whether that base is still shared is a question about the rows rather than an
+assumption the table is allowed to make -- see ``link_rows`` below.
+
+Every state is read from a commit
+---------------------------------
 
 Not one from a commit and one from the working tree. A working tree carries
 whatever is lying around in it -- an untracked scratch file, a half-written
 note -- and a comparison between a clean checkout and a working tree reports
-those as things the second state added. The two readings have to be the same
-kind of reading before their difference means anything.
+those as things the second state added. The readings have to be the same kind
+of reading before their difference means anything.
 
-It also settles the acceptance rule the cheap way: a detached worktree checks
-nothing out over the tree the caller is standing in.
+Nothing writes to the repository a state comes from
+---------------------------------------------------
+
+The checkout is a clone, not a worktree. ``git worktree add`` writes to the
+repository it is run in, and a state can come from a repository this project is
+allowed to read and not to touch -- somebody else's work, indexed to be
+compared and not to be changed. A clone leaves no registration, no lock and no
+file behind in the repository it read, and it is the same operation for every
+state, which a materialisation that wrote to one repository and not to another
+would not be.
+
+It settles the acceptance rule the cheap way too: a clone checks nothing out
+over the tree the caller is standing in.
 
 Both absolute figures, beside every delta
 -----------------------------------------
@@ -52,6 +78,18 @@ still unordered, and nothing here changes that.
 The number folded is reported **per state**, beside the counts and never inside
 them. A fold that happens in one state and not the other is exactly what moves a
 zero, and one summed figure would hide which state it happened in.
+
+What the fold would otherwise hide
+----------------------------------
+
+Printed beside it: how many names in each state resolve to another name, and
+what those names weigh. Fourteen 32-byte links and fourteen full-sized copies
+of the files those links used to name are different repositories, and after the
+fold both read as fourteen names counted once -- which is the right answer to
+"how many files is this" and no answer at all to "is this still the same base".
+A copy that no longer tracks its source is a rewritten base whatever a diff
+says, so the figure that tells the two apart is printed rather than left to be
+worked out by hand.
 """
 
 from __future__ import annotations
@@ -100,6 +138,13 @@ ZERO_ROWS = 12
 # How wide a path or a state label is printed before it is cut.
 MAX_TEXT_WIDTH = 56
 
+# How wide a state's label is printed as a column heading, and how wide each
+# half of a delta heading is. Narrower than the label in the header block: the
+# header names every state in full, and the column heading only has to tell
+# them apart.
+MAX_LABEL_WIDTH = 16
+DELTA_LABEL_WIDTH = 10
+
 # Every edge kind this domain writes, listed at zero as well as at count.
 # Sourced from the modules that own them where one does, so that a rename
 # reaches this inventory rather than quietly emptying a row of it -- the same
@@ -125,11 +170,33 @@ class CompareError(Exception):
 
 @dataclass(frozen=True)
 class Row:
-    """One measurement in both states, and the difference between them."""
+    """One measurement in every state, and its difference from the first.
+
+    Two states or ten: the first is the one the rest are differenced from,
+    because a comparison of three states is three readings and two subtractions
+    rather than a chain, and a chain would report ``C2 - C1`` for a pair of
+    states that never shared a base.
+    """
 
     name: str
-    before: int
-    after: int
+    values: tuple[int, ...]
+
+    @property
+    def deltas(self) -> tuple[int, ...]:
+        """Every state after the first, against the first."""
+        return tuple(value - self.values[0] for value in self.values[1:])
+
+    @property
+    def moved(self) -> bool:
+        return any(self.deltas)
+
+    @property
+    def before(self) -> int:
+        return self.values[0]
+
+    @property
+    def after(self) -> int:
+        return self.values[-1]
 
     @property
     def delta(self) -> int:
@@ -153,12 +220,23 @@ class State:
     """
 
     label: str
+    # Where the state was read from, and where it came from. ``root`` is the
+    # clone this run indexed, which is gone by the time anything is printed;
+    # ``origin`` is the repository it was cloned from, which is the one a
+    # reader can go and look at.
     root: str
+    origin: str
     branch: str
     commit_sha: str
     detector_set_version: str
 
     files_walked: int = 0
+    # What that same walk weighed, a link at the length of its own name. The
+    # denominator in the other unit: two states holding the same number of
+    # files can hold ten times the bytes, and a count of files says which of
+    # those a repository is about as well as a count of pages says how long a
+    # book is.
+    bytes_walked: int = 0
     files_by_suffix: dict[str, int] = field(default_factory=dict)
     files_by_directory: dict[str, int] = field(default_factory=dict)
 
@@ -175,6 +253,14 @@ class State:
     surfaces_folded: int = 0
     folds: tuple[Fold, ...] = ()
     surface_labels: frozenset[str] = frozenset()
+    # Rows whose own name resolves to another name, and what those rows weigh,
+    # counted before the fold takes any of them away. Fourteen 32-byte links
+    # and fourteen full-sized copies of the files they named are different
+    # repositories, and after the fold both read as fourteen names counted
+    # once -- so the question of which one a state is has to be answered here
+    # or not at all.
+    link_rows: int = 0
+    link_bytes: int = 0
 
     clauses: int = 0
     clauses_by_type: dict[str, int] = field(default_factory=dict)
@@ -191,84 +277,102 @@ class State:
 
 @dataclass(frozen=True)
 class Comparison:
-    """Two states, and every measurement taken of both."""
+    """Two or more states, and every measurement taken of each.
 
-    before: State
-    after: State
+    ``states`` is ordered, and the first is the baseline every delta is taken
+    against. Three states of one lineage are the shape this was widened for --
+    an untouched base and two repositories descended from it -- and a delta
+    against the base is the only subtraction that is defined for all three of
+    them.
+    """
+
+    states: tuple[State, ...]
     database_path: str
 
     @property
+    def before(self) -> State:
+        """The baseline: the state every delta is taken against."""
+        return self.states[0]
+
+    @property
+    def after(self) -> State:
+        """The last state read. With two states, the one differenced to."""
+        return self.states[-1]
+
+    @property
     def comparable(self) -> bool:
-        """Whether subtracting these two readings says anything.
+        """Whether subtracting these readings says anything.
 
         One condition, and it is the one the detector version exists for: a
         change in the detectors and a change in the estate move the same
         numbers, and nothing else tells them apart.
         """
-        return (
-            self.before.detector_set_version == self.after.detector_set_version
-        )
+        return len({state.detector_set_version for state in self.states}) == 1
+
+    def _row(self, name: str, read) -> Row:
+        return Row(name, tuple(read(state) for state in self.states))
 
     def rows(self) -> list[Row]:
         """The counted section, in the order it is printed."""
         return [
-            Row("files walked", self.before.files_walked, self.after.files_walked),
-            Row("files carrying a surface kind, folded",
-                self.before.surface_files, self.after.surface_files),
+            self._row("files walked", lambda state: state.files_walked),
+            self._row("bytes walked", lambda state: state.bytes_walked),
+            self._row("files carrying a surface kind, folded",
+                      lambda state: state.surface_files),
             self.surfaces(),
-            Row("of those, read in full",
-                self.before.surfaces_read_in_full,
-                self.after.surfaces_read_in_full),
-            Row("two names for one file, folded",
-                self.before.surfaces_folded, self.after.surfaces_folded),
-            Row("clauses", self.before.clauses, self.after.clauses),
-            Row("pointers", self.before.pointers, self.after.pointers),
-            Row("surface bytes",
-                self.before.surface_bytes, self.after.surface_bytes),
+            self._row("of those, read in full",
+                      lambda state: state.surfaces_read_in_full),
+            self._row("names that resolve to another name",
+                      lambda state: state.link_rows),
+            self._row("two names for one file, folded",
+                      lambda state: state.surfaces_folded),
+            self._row("clauses", lambda state: state.clauses),
+            self._row("pointers", lambda state: state.pointers),
+            self._row("surface bytes", lambda state: state.surface_bytes),
         ]
 
     def surfaces(self) -> Row:
         """The row the comparison turns on: surfaces, after the fold."""
-        return Row("surfaces",
-                   self.before.surface_rows, self.after.surface_rows)
+        return self._row("surfaces", lambda state: state.surface_rows)
+
+    def _tallies(self, read) -> dict[str, Row]:
+        return _tally_rows([read(state) for state in self.states])
 
     def suffixes(self) -> dict[str, Row]:
-        return _tally_rows(self.before.files_by_suffix, self.after.files_by_suffix)
+        return self._tallies(lambda state: state.files_by_suffix)
 
     def directories(self) -> dict[str, Row]:
-        return _tally_rows(self.before.files_by_directory,
-                           self.after.files_by_directory)
+        return self._tallies(lambda state: state.files_by_directory)
 
     def surface_kinds(self) -> dict[str, Row]:
-        return _tally_rows(self.before.surfaces_by_kind,
-                           self.after.surfaces_by_kind)
+        return self._tallies(lambda state: state.surfaces_by_kind)
 
     def clause_types(self) -> dict[str, Row]:
-        return _tally_rows(self.before.clauses_by_type,
-                           self.after.clauses_by_type)
+        return self._tallies(lambda state: state.clauses_by_type)
 
     def pointer_subtypes(self) -> dict[str, Row]:
-        return _tally_rows(self.before.pointers_by_subtype,
-                           self.after.pointers_by_subtype)
+        return self._tallies(lambda state: state.pointers_by_subtype)
 
     def edges(self) -> dict[str, Row]:
-        return _tally_rows(self.before.edges_by_kind, self.after.edges_by_kind)
+        return self._tallies(lambda state: state.edges_by_kind)
 
     def external_refs(self) -> dict[str, Row]:
-        return _tally_rows(self.before.external_refs_by_sub_kind,
-                           self.after.external_refs_by_sub_kind)
+        return self._tallies(lambda state: state.external_refs_by_sub_kind)
 
 
-def _tally_rows(before: dict[str, int], after: dict[str, int]) -> dict[str, Row]:
-    """Both tallies, over the union of their keys.
+def _tally_rows(tallies: list[dict[str, int]]) -> dict[str, Row]:
+    """Every tally, over the union of their keys.
 
-    The union rather than either side's keys: a directory that exists in one
-    state and not the other is the thing being looked for, and a row missing
-    from the table reads as a directory that did not move.
+    The union rather than any one state's keys: a directory that exists in one
+    state and not another is the thing being looked for, and a row missing from
+    the table reads as a directory that did not move.
     """
+    names: set[str] = set()
+    for tally in tallies:
+        names |= set(tally)
     return {
-        name: Row(name, before.get(name, 0), after.get(name, 0))
-        for name in sorted(set(before) | set(after))
+        name: Row(name, tuple(tally.get(name, 0) for tally in tallies))
+        for name in sorted(names)
     }
 
 
@@ -286,7 +390,7 @@ def _snapshot(alias: str = "") -> str:
 _SNAPSHOT = _snapshot()
 
 _RUN_SQL = (
-    "SELECT detector_set_version, files_walked, "
+    "SELECT detector_set_version, files_walked, bytes_walked, "
     "       files_walked_by_suffix, files_walked_by_directory "
     f"FROM gl_context_run WHERE {_SNAPSHOT}"
 )
@@ -319,11 +423,12 @@ _EXTERNAL_SQL = (
 
 
 def read_state(connection, found: Repository, label: str,
-               db_path: str | Path = "") -> State:
+               origin: str | Path = "", db_path: str | Path = "") -> State:
     """Read one indexed snapshot back out of the graph, folded.
 
-    ``db_path`` is carried only so that a store whose columns predate this build
-    is named with the file the reader would have to migrate.
+    ``origin`` is the repository the snapshot's clone came from; ``db_path`` is
+    carried only so that a store whose columns predate this build is named with
+    the file the reader would have to migrate.
     """
     snapshot = [found.project_id, found.branch, found.commit_sha]
     try:
@@ -343,7 +448,7 @@ def read_state(connection, found: Repository, label: str,
         raise CompareError(
             f"no index run recorded for {label} at {found.commit_sha[:12]}"
         )
-    version, files_walked, by_suffix, by_directory = run[0]
+    version, files_walked, bytes_walked, by_suffix, by_directory = run[0]
     for column, serialised in (("files_walked_by_suffix", by_suffix),
                                ("files_walked_by_directory", by_directory)):
         if files_walked and not serialised:
@@ -358,10 +463,12 @@ def read_state(connection, found: Repository, label: str,
     state = State(
         label=label,
         root=str(found.root),
+        origin=str(origin or found.root),
         branch=found.branch,
         commit_sha=found.commit_sha,
         detector_set_version=version,
         files_walked=int(files_walked),
+        bytes_walked=int(bytes_walked or 0),
         files_by_suffix=_tally(by_suffix),
         files_by_directory=_tally(by_directory),
         edges_by_kind={
@@ -498,6 +605,12 @@ def _folded(state: State, rows: list[tuple]) -> State:
     )
     return replace(
         state,
+        # Counted over the links themselves, before any of them was folded
+        # away: what a state holds fourteen of is the question, and after the
+        # fold a state holding fourteen links and a state holding fourteen
+        # copies both read as fourteen names counted once.
+        link_rows=len(links),
+        link_bytes=sum(entry.size_bytes for entry, _ in links),
         surface_files=len(labels),
         surface_rows=len(kept),
         surfaces_read_in_full=sum(1 for entry in kept if entry.read_in_full),
@@ -537,56 +650,118 @@ def _git(root: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-@contextmanager
-def _worktree(repo_root: Path, ref: str):
-    """One state, checked out beside the repository rather than over it.
+@dataclass(frozen=True)
+class StateSpec:
+    """One state to read: a repository, a commit in it, and what to call it."""
 
-    ``--detach`` because a state is a commit, not a branch: checking a branch
-    out into a worktree would move it, and two states of one repository are
-    frequently one branch's own history.
+    repo: Path
+    ref: str
+    label: str
+
+
+def parse_state(text: str, default_repo: str | Path) -> StateSpec:
+    """One state as it is typed: ``ref``, or ``path@ref`` in another repository.
+
+    The separator is read from the **right**, and only where the text before it
+    names a directory that is there. A git ref is allowed to hold an ``@`` --
+    ``main@{yesterday}`` is one -- so a rule that split on the character alone
+    would take a ref apart and then report the repository it invented as one
+    that could not be read. Nothing on the left that is not a directory is a
+    repository, so a ref keeps its own text.
     """
-    commit = _git(repo_root, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    default = Path(default_repo).resolve()
+    positions = [index for index, character in enumerate(text) if character == "@"]
+    for index in reversed(positions):
+        repo = Path(text[:index]).expanduser()
+        if text[:index] and repo.is_dir():
+            root = repo.resolve()
+            ref = text[index + 1:]
+            return StateSpec(root, ref, f"{root.name}@{ref}")
+    return StateSpec(default, text, text)
+
+
+@contextmanager
+def _checkout(spec: StateSpec):
+    """One state, cloned beside its repository rather than checked out in it.
+
+    **Nothing here writes to the repository a state comes from.** A clone reads;
+    it leaves no worktree registration, no lock and no new file behind. That
+    matters because a state can come from a repository this project is only
+    allowed to read -- somebody else's work, indexed to be compared and not to
+    be touched -- and a materialisation that wrote to one repository and not to
+    another would also be two kinds of reading.
+
+    ``--detach`` for the same reason a worktree would need it: a state is a
+    commit, not a branch, and checking out a branch here would say a state is
+    wherever that branch has got to.
+    """
+    commit = _git(spec.repo, "rev-parse", "--verify", f"{spec.ref}^{{commit}}")
     holder = Path(tempfile.mkdtemp(prefix="orbit-context-state-"))
-    tree = holder / commit[:12]
+    tree = holder / f"{spec.repo.name}-{commit[:12]}"
     try:
-        _git(repo_root, "worktree", "add", "--detach", str(tree), commit)
-    except CompareError:
-        shutil.rmtree(holder, ignore_errors=True)
-        raise
-    try:
+        _git(holder, "clone", "--quiet", "--no-checkout", "--local",
+             str(spec.repo), str(tree))
+        # A clone carries what the repository's branches and tags reach. A
+        # commit reachable from neither is a state this cannot materialise, and
+        # saying so here names the state rather than leaving git to report a
+        # missing object out of a directory the caller never asked for.
+        if not _reachable(tree, commit):
+            raise CompareError(
+                f"{spec.label} is {commit[:12]} in {spec.repo}, which no branch "
+                "or tag of that repository reaches"
+            )
+        _git(tree, "checkout", "--quiet", "--detach", commit)
         yield tree
     finally:
-        # Removed even where the index run raised: a worktree left behind is a
-        # second checkout of somebody's repository that nothing here will ever
-        # come back for.
-        subprocess.run(["git", "worktree", "remove", "--force", str(tree)],
-                       cwd=repo_root, capture_output=True, text=True, check=False)
+        # Removed even where the index run raised: a clone left behind is a
+        # second copy of somebody's repository that nothing here will ever come
+        # back for.
         shutil.rmtree(holder, ignore_errors=True)
-        subprocess.run(["git", "worktree", "prune"], cwd=repo_root,
-                       capture_output=True, text=True, check=False)
 
 
-def read_ref(repo_root: Path, ref: str, db_path: str | Path,
-             ontology_root: str | Path | None = None) -> State:
+def _reachable(tree: Path, commit: str) -> bool:
+    """Whether one clone holds the commit its state was named for."""
+    result = subprocess.run(
+        ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
+        cwd=tree, capture_output=True, text=True, check=False,
+    )
+    return result.returncode == 0
+
+
+def read_spec(spec: StateSpec, db_path: str | Path,
+              ontology_root: str | Path | None = None) -> State:
     """Materialise one state, index it, and read the snapshot back."""
-    with _worktree(repo_root, ref) as tree:
+    with _checkout(spec) as tree:
         index(tree, db_path=db_path, ontology_root=ontology_root)
         found = git_info(tree)
     connection = store.connect(db_path, read_only=True)
     try:
-        return read_state(connection, found, label=ref, db_path=db_path)
+        return read_state(connection, found, label=spec.label,
+                          origin=spec.repo, db_path=db_path)
     finally:
         connection.close()
 
 
-def compare(repo: str | Path, before: str, after: str,
+def compare(repo: str | Path, *refs: str,
             db_path: str | Path = store.DEFAULT_DB_PATH,
             ontology_root: str | Path | None = None) -> Comparison:
-    """Index two states of one repository and difference them."""
+    """Index two or more states and difference each against the first.
+
+    Each ref is read as `parse_state` reads it, so a state named
+    ``../other-repository@782a886`` is a state of another repository and every
+    other one is a state of ``repo``.
+    """
+    if len(refs) < 2:
+        raise CompareError(
+            "a comparison is two states or more; "
+            f"{len(refs)} was given"
+        )
     root = Path(repo).resolve()
     return Comparison(
-        before=read_ref(root, before, db_path, ontology_root),
-        after=read_ref(root, after, db_path, ontology_root),
+        states=tuple(
+            read_spec(parse_state(ref, root), db_path, ontology_root)
+            for ref in refs
+        ),
         database_path=str(Path(db_path)),
     )
 
@@ -606,28 +781,49 @@ def _delta(value: int) -> str:
     return f"+{value}" if value > 0 else str(value)
 
 
-def _table(rows: list[Row], before: str, after: str, indent: str = "  ") -> list[str]:
-    """Aligned ``name  before  after  delta`` lines, headed by the two states.
+def _delta_headings(labels: list[str]) -> list[str]:
+    """What each delta column is called: every state, against the first.
 
-    Both figures are printed on every row, always. That is the whole discipline
-    of this file: a column of deltas on its own cannot say which side moved.
+    Two states keep the bare word. Three or more cannot: two columns both
+    called "delta" would be two subtractions the reader has to work out from
+    their order, and the order is exactly what a wide table loses.
+    """
+    if len(labels) == 2:
+        return ["delta"]
+    return [
+        f"{_short(label, DELTA_LABEL_WIDTH)}-{_short(labels[0], DELTA_LABEL_WIDTH)}"
+        for label in labels[1:]
+    ]
+
+
+def _table(rows: list[Row], labels: list[str], indent: str = "  ") -> list[str]:
+    """Aligned ``name  value per state  delta per state`` lines.
+
+    Every state's own figure is printed on every row, always. That is the whole
+    discipline of this file: a column of deltas on its own cannot say which side
+    moved, and with three states it cannot even say which pair moved.
     """
     if not rows:
         return [f"{indent}(none)"]
+    headings = _delta_headings(labels)
+    cells = [[str(value) for value in row.values]
+             + [_delta(delta) for delta in row.deltas] for row in rows]
+    titles = [_short(label, MAX_LABEL_WIDTH) for label in labels] + headings
     name_width = max([len(row.name) for row in rows] + [len("state")])
-    columns = [
-        max([len(str(row.before)) for row in rows] + [len(before)]),
-        max([len(str(row.after)) for row in rows] + [len(after)]),
+    widths = [
+        max([len(cell[column]) for cell in cells] + [len(titles[column])])
+        for column in range(len(titles))
     ]
-    delta_width = max([len(_delta(row.delta)) for row in rows] + [len("delta")])
     lines = [
-        f"{indent}{'state':<{name_width}}  {before:>{columns[0]}}"
-        f"  {after:>{columns[1]}}  {'delta':>{delta_width}}"
+        indent + f"{'state':<{name_width}}  " + "  ".join(
+            f"{title:>{width}}" for title, width in zip(titles, widths)
+        )
     ]
-    for row in rows:
+    for row, cell in zip(rows, cells):
         lines.append(
-            f"{indent}{row.name:<{name_width}}  {row.before:>{columns[0]}}"
-            f"  {row.after:>{columns[1]}}  {_delta(row.delta):>{delta_width}}"
+            indent + f"{row.name:<{name_width}}  " + "  ".join(
+                f"{value:>{width}}" for value, width in zip(cell, widths)
+            )
         )
     return lines
 
@@ -640,16 +836,16 @@ def _listed(rows: dict[str, Row], rename=None) -> list[Row]:
     falls only on the zeroes, and never on a row carrying a delta.
     """
     named = [
-        Row(rename(row.name) if rename else row.name, row.before, row.after)
+        Row(rename(row.name) if rename else row.name, row.values)
         for row in rows.values()
     ]
-    moved = [row for row in named if row.delta]
-    still = [row for row in named if not row.delta]
+    moved = [row for row in named if row.moved]
+    still = [row for row in named if not row.moved]
     return moved + still[:ZERO_ROWS]
 
 
 def _unlisted(rows: dict[str, Row]) -> int:
-    still = [row for row in rows.values() if not row.delta]
+    still = [row for row in rows.values() if not row.moved]
     return max(0, len(still) - ZERO_ROWS)
 
 
@@ -662,41 +858,57 @@ def _directory_name(directory: str) -> str:
 
 
 def _header(comparison: Comparison) -> list[str]:
-    before, after = comparison.before, comparison.after
-    lines = [
-        "orbit-context compare",
-        f"  before       {_short(before.label, 24)}  {before.commit_sha[:12]}"
-        f"  {_short(before.root, 48)}",
-        f"  after        {_short(after.label, 24)}  {after.commit_sha[:12]}"
-        f"  {_short(after.root, 48)}",
-    ]
+    lines = ["orbit-context compare"]
+    for position, state in enumerate(comparison.states):
+        name = "baseline" if position == 0 else f"state {position}"
+        lines.append(
+            f"  {name:<12} {_short(state.label, 24)}  {state.commit_sha[:12]}"
+            f"  {_short(state.origin, 48)}"
+        )
     if comparison.comparable:
         lines.append(
-            f"  detectors    {before.detector_set_version}  (both states)"
+            f"  detectors    {comparison.before.detector_set_version}  "
+            f"(every state)"
         )
     else:
-        lines.append(f"  detectors    {before.detector_set_version}  before")
-        lines.append(f"               {after.detector_set_version}  after")
+        for state in comparison.states:
+            lines.append(
+                f"  detectors    {state.detector_set_version}  "
+                f"{_short(state.label, 24)}"
+            )
         lines.append(f"  {NOT_COMPARABLE}.")
         lines.append(
             "  A change in the detectors and a change in the repository move "
             "the same numbers."
         )
-    if detectors.VERSION != before.detector_set_version:
+    if detectors.VERSION != comparison.before.detector_set_version:
         lines.append(
             f"  This build is {detectors.VERSION}; the counts below are what "
             "the set that wrote them found."
         )
     lines.append(f"  graph        {_short(comparison.database_path, 48)}")
     lines.append(
-        "  Each state was indexed from a detached worktree of its own commit, "
-        "so no"
+        "  Every state was indexed from a clone of its own commit, so no "
+        "working tree"
     )
     lines.append(
-        "  working tree was checked out over and neither reading carries "
-        "anything its"
+        "  was checked out over, no repository a state came from was written "
+        "to, and no"
     )
-    lines.append("  commit does not.")
+    lines.append("  reading carries anything its commit does not.")
+    if len({state.origin for state in comparison.states}) > 1:
+        lines.append(
+            "  The states are not all from one repository. Every delta below "
+            "is against"
+        )
+        lines.append(
+            "  the baseline, and what a delta between repositories measures "
+            "is only what"
+        )
+        lines.append(
+            "  their shared base makes it: read the baseline's own figures "
+            "first."
+        )
     return lines
 
 
@@ -704,12 +916,15 @@ def _heading(title: str, summary: str, version: str) -> str:
     return f"\n{title}  {summary}  [{version}]"
 
 
+def _labels(comparison: Comparison) -> list[str]:
+    return [state.label for state in comparison.states]
+
+
 def _counts(comparison: Comparison) -> list[str]:
     return [
-        _heading("COUNTS", "both figures beside every delta",
+        _heading("COUNTS", "every state's own figures beside every delta",
                  comparison.before.detector_set_version),
-        *_table(comparison.rows(), comparison.before.label,
-                comparison.after.label),
+        *_table(comparison.rows(), _labels(comparison)),
     ]
 
 
@@ -722,9 +937,16 @@ def _still(rows: dict[str, Row], name: str) -> Row:
     or not, which is also what makes the cap safe: nothing a cap left out is
     missing from the table, only from the listing.
     """
-    still = [row for row in rows.values() if not row.delta]
-    return Row(name, sum(row.before for row in still),
-               sum(row.after for row in still))
+    still = [row for row in rows.values() if not row.moved]
+    return Row(name, tuple(
+        sum(row.values[column] for row in still)
+        for column in range(_columns(rows))
+    ))
+
+
+def _columns(rows: dict[str, Row]) -> int:
+    """How many states these rows were read from, taken off the rows."""
+    return len(next(iter(rows.values())).values) if rows else 0
 
 
 def _by_name(comparison: Comparison, title: str, summary: str,
@@ -741,7 +963,7 @@ def _by_name(comparison: Comparison, title: str, summary: str,
         listed = listed + [_still(rows, still)]
     lines = [
         _heading(title, summary, comparison.before.detector_set_version),
-        *_table(listed, comparison.before.label, comparison.after.label),
+        *_table(listed, _labels(comparison)),
     ]
     unlisted = _unlisted(rows)
     if unlisted:
@@ -753,13 +975,23 @@ def _by_name(comparison: Comparison, title: str, summary: str,
 
 
 def _folds(comparison: Comparison) -> list[str]:
-    """The fold, per state, beside the counts rather than inside them."""
+    """The fold, per state, beside the counts rather than inside them.
+
+    The link count and what the links weigh are printed here with it, and
+    before it. After the fold a state holding a name that resolves to another
+    name and a state holding a full copy under that same name both read as one
+    file counted once -- which is the right answer to "how many files is this"
+    and no answer at all to "is this still the same repository".
+    """
     lines = [
         _heading("TWO NAMES FOR ONE FILE", "counted once, labelled by the target",
                  comparison.before.detector_set_version)
     ]
-    for state in (comparison.before, comparison.after):
-        lines.append(f"  {_short(state.label, 24)}  {state.surfaces_folded} folded")
+    for state in comparison.states:
+        lines.append(
+            f"  {_short(state.label, 24)}  {state.link_rows} names resolving to "
+            f"another name, {state.link_bytes} bytes, {state.surfaces_folded} folded"
+        )
         for fold in state.folds[:EXAMPLE_ROWS]:
             lines.append(
                 f"      {_short(fold.name, 40)} counted as {_short(fold.counted_as, 40)}"
@@ -777,7 +1009,7 @@ def _closing(comparison: Comparison) -> list[str]:
     lines = [
         "",
         "Deltas are counts and bytes. Nothing here says what a difference means,",
-        "which of the two states is the better one, or what to do about either.",
+        "which state is the better one, or what to do about any of them.",
     ]
     if not comparison.comparable:
         lines.append(f"{NOT_COMPARABLE}.")
@@ -793,20 +1025,20 @@ def _identical_bytes(comparison: Comparison) -> list[str]:
     `pairs.PairCounts`, which is where these four figures come from, rather than
     a habit this file has to remember.
     """
-    before, after = comparison.before.pair_counts, comparison.after.pair_counts
+    counts = [state.pair_counts for state in comparison.states]
     rows = [
-        Row("pairs", before.total, after.total),
-        Row("carrying provenance evidence",
-            before.with_provenance, after.with_provenance),
-        Row("carrying no provenance evidence",
-            before.without_provenance, after.without_provenance),
-        Row("carrying a direction",
-            before.with_a_direction, after.with_a_direction),
+        Row(name, tuple(getattr(count, attribute) for count in counts))
+        for name, attribute in (
+            ("pairs", "total"),
+            ("carrying provenance evidence", "with_provenance"),
+            ("carrying no provenance evidence", "without_provenance"),
+            ("carrying a direction", "with_a_direction"),
+        )
     ]
     return [
         _heading("IDENTICAL BYTES", "pairs, and what evidences them",
                  comparison.before.detector_set_version),
-        *_table(rows, comparison.before.label, comparison.after.label),
+        *_table(rows, _labels(comparison)),
         "  Whether two identical files are intentionally identical stays UNKNOWN.",
     ]
 
@@ -846,21 +1078,26 @@ def _edge_rows(comparison: Comparison) -> dict[str, Row]:
     """Every edge kind this domain writes, present at zero as well as at count."""
     rows = comparison.edges()
     for kind in EDGE_KINDS:
-        rows.setdefault(kind, Row(kind, 0, 0))
+        rows.setdefault(kind, _absent(kind, comparison))
     return dict(sorted(rows.items()))
+
+
+def _absent(name: str, comparison: Comparison) -> Row:
+    """A row at zero in every state, for a kind no state carried."""
+    return Row(name, tuple(0 for _ in comparison.states))
 
 
 def _external_rows(comparison: Comparison) -> dict[str, Row]:
     """All three non-resolutions, always. Each names what could not be seen."""
     rows = comparison.external_refs()
     for sub_kind in pointers.SUB_KINDS:
-        rows.setdefault(sub_kind, Row(sub_kind, 0, 0))
+        rows.setdefault(sub_kind, _absent(sub_kind, comparison))
     return dict(sorted(rows.items()))
 
 
-def compare_text(repo: str | Path, before: str, after: str,
+def compare_text(repo: str | Path, *refs: str,
                  db_path: str | Path = store.DEFAULT_DB_PATH,
                  ontology_root: str | Path | None = None) -> tuple[str, bool]:
     """The comparison, rendered, and whether its deltas are comparable."""
-    comparison = compare(repo, before, after, db_path, ontology_root)
+    comparison = compare(repo, *refs, db_path=db_path, ontology_root=ontology_root)
     return render(comparison), comparison.comparable

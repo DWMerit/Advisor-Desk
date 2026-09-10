@@ -282,6 +282,39 @@ class TestASymlinkIsANode(IndexedEstate):
         self.assertEqual(identical["files_not_read"], len(LINKED_PATHS))
 
 
+class TestWhatTheWalkWeighs(IndexedEstate):
+    """Bytes walked, sized the way a node is sized rather than a file read.
+
+    The denominator a share of bytes is read against, and it has to take a link
+    at the link's own weight: a repository holding fourteen 32-byte links and
+    one holding fourteen copies of the books they name are different
+    repositories, and a walk that sized a link by its target would report them
+    as the same one.
+    """
+
+    def test_a_link_weighs_its_own_bytes_and_not_the_file_it_names(self):
+        walked = {
+            entry.relative_path: entry.size_bytes
+            for entry in surfaces.walk_files(self.root)
+        }
+        for link in sorted(FULL_LINKS):
+            target = self.root / link
+            self.assertEqual(walked[link], target.lstat().st_size, link)
+            self.assertLess(walked[link], target.stat().st_size, link)
+
+    def test_the_run_row_carries_what_the_walk_weighed(self):
+        walked = surfaces.walk_files(self.root)
+        self.assertEqual(
+            self.repo["coverage"]["bytes_walked"],
+            sum(entry.size_bytes for entry in walked),
+        )
+        self.assertEqual(
+            _query(self.db, "SELECT bytes_walked FROM gl_context_run "
+                            f"WHERE path = '{self.root}'"),
+            [(sum(entry.size_bytes for entry in walked),)],
+        )
+
+
 class TestTheCorpusShareCountsOnlyFilesThatWereRead(IndexedEstate):
     """The trap, measured rather than argued.
 

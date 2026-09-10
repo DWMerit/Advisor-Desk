@@ -86,6 +86,11 @@ class RepoResult:
     # The walk, and how much of it these detectors recognise anything in.
     files_walked: int = 0
     files_with_surface_kind: int = 0
+    # What the same walk weighed, a link at its own name's length. The
+    # denominator a share of bytes is read against, beside the denominator a
+    # share of files is read against -- two files and two megabytes are
+    # different findings about one repository.
+    bytes_walked: int = 0
     # Rows this repository's write took out of the store, per table. Zero on a
     # first index; on a re-index it is what the run stood on top of, and a
     # reader can tell that from a total that did not move.
@@ -542,7 +547,7 @@ def _now() -> datetime:
 def _run_row(node: NodeType, repo: Repository, indexed_root: Path,
              indexed_at: datetime,
              files_walked: int, files_with_surface_kind: int,
-             walked: list[surfaces.WalkedFile]) -> dict:
+             bytes_walked: int, walked: list[surfaces.WalkedFile]) -> dict:
     """The one row saying what this run covered, and which detectors read it.
 
     ``files_with_surface_kind`` counts distinct paths, not rows: a settings file
@@ -568,6 +573,7 @@ def _run_row(node: NodeType, repo: Repository, indexed_root: Path,
         "excluded_directories": ", ".join(sorted(surfaces.PRUNED_DIRECTORIES)),
         "files_walked": files_walked,
         "files_with_surface_kind": files_with_surface_kind,
+        "bytes_walked": bytes_walked,
         # JSON rather than a joined list: a suffix and a directory name are the
         # estate's own text, and either can hold whatever separator a joined
         # list would pick.
@@ -712,6 +718,7 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     result.ladders = _ladder_tally(rung_rows, rungs_without_a_base)
     result.recognition = _recognition_tally(rows.values())
     result.files_walked = len(walked)
+    result.bytes_walked = surfaces.bytes_walked(walked)
     # Distinct paths, not rows. A settings file is one file however many hooks
     # it holds, and a hook target is the same file seen from another angle.
     result.files_with_surface_kind = len({row["path"] for row in rows.values()})
@@ -734,7 +741,7 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
          [_run_row(run_node, repo, indexed_root or repo.root,
                    indexed_at or _now(),
                    result.files_walked, result.files_with_surface_kind,
-                   walked)]),
+                   result.bytes_walked, walked)]),
         (tables[coverage_node.table],
          _coverage_rows(coverage_node, repo, result.coverage)),
     ):
@@ -815,18 +822,24 @@ def _recognition_totals(results: list[RepoResult]) -> dict:
     }
 
 
-def _coverage(files_walked: int, files_with_surface_kind: int) -> dict:
+def _coverage(files_walked: int, files_with_surface_kind: int,
+              bytes_walked: int) -> dict:
     """The denominator beside the numerator, always both.
 
     A surface count on its own cannot be read: twelve surfaces out of fourteen
     files and twelve out of 1,775 are the same number about two different
     estates. The second figure is what makes a thin result read as "these
     detectors recognise little here" rather than as a description of the estate.
+
+    ``bytes_walked`` is the same denominator in the other unit. Fourteen files
+    can be a corpus or a line each, and a count of them says which of those a
+    repository is about as well as a count of pages says how long a book is.
     """
     return {
         "files_walked": files_walked,
         "files_with_surface_kind": files_with_surface_kind,
         "files_with_no_surface_kind": files_walked - files_with_surface_kind,
+        "bytes_walked": bytes_walked,
     }
 
 
@@ -843,6 +856,7 @@ def _coverage_totals(results: list[RepoResult]) -> dict:
     return _coverage(
         sum(result.files_walked for result in results),
         sum(result.files_with_surface_kind for result in results),
+        sum(result.bytes_walked for result in results),
     )
 
 
@@ -996,7 +1010,8 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                     "ladders": dict(result.ladders),
                 },
                 "coverage": _coverage(result.files_walked,
-                                      result.files_with_surface_kind),
+                                      result.files_with_surface_kind,
+                                      result.bytes_walked),
                 "processing": {
                     "skipped_files": len(result.skipped),
                     "errored_files": len(result.errored),

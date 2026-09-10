@@ -69,11 +69,13 @@ supports or an explicit UNKNOWN and the reason there is none:
 orbit/bin/orbit-context pairs --repo /path/to/the/repository
 ```
 
-Or difference two states of one repository — index each, subtract, and print
-both states' own figures beside every delta:
+Or difference two states — or three, one of them in another repository — by
+indexing each, subtracting against the first, and printing every state's own
+figures beside every delta:
 
 ```sh
 orbit/bin/orbit-context compare main HEAD --repo /path/to/the/repository
+orbit/bin/orbit-context compare a7d7649 HEAD ../agent-rules-books@782a886 --repo .
 ```
 
 Or ask one book for its ladder — every rung it was written at, largest first:
@@ -911,43 +913,89 @@ this tool could not attach is not the same as a rung never written.
 How many rungs a book carries is an observation, not a defect. A book at two is
 reported at two, beside the books at three.
 
-## Two states of one repository, differenced
+## Two states, or three, differenced
 
-`compare` takes two git refs, indexes each, and prints the difference with both
-states' own figures beside every delta.
+`compare` takes two or more states, indexes each, and prints every state's own
+figures beside its difference from the first.
 
 ```sh
 orbit/bin/orbit-context compare main HEAD --repo /path/to/the/repository
 ```
 
-A comparison is two indexes plus subtraction, and it is built as exactly that.
+A state is a git ref in `--repo`, or `path@ref` for a state of **another
+repository** — which is what makes a three-state comparison of one lineage
+possible:
+
+```sh
+orbit/bin/orbit-context compare a7d7649 HEAD ../agent-rules-books@782a886 --repo .
+```
+
+The `@` is read from the right, and only where the text before it names a
+directory that is there. A git ref is allowed to hold one — `main@{yesterday}`
+is a ref — so a rule that split on the character alone would take a ref apart
+and then report the repository it invented as one that could not be read.
+
+A comparison is N indexes plus subtraction, and it is built as exactly that.
 It has **no store of its own, no index path of its own and no query language of
 its own** — spec 0002 §12 lists each of those as a kill condition, because each
 would mean the figures in this table were taken differently from the figures
 every other command prints.
 
-### Both states are read from a commit
+### Every delta is against the first state
 
-Each state is materialised with `git worktree add --detach` and indexed there.
-Two consequences, and both are the point:
+Not a chain. Three states of one lineage are an untouched base and two
+descendants of it, and `C2 − C1` is a subtraction between two repositories that
+never shared anything but that base — printed as a delta it would read as one
+session having done what a whole second repository did. The baseline is the
+only state they all share, so it is the only one they are all differenced
+against, and each delta column is named for the state it was taken from.
+
+Where the states are not all from one repository the header says so. What a
+delta between two repositories measures is only what their shared base makes
+it, and whether that base is still shared is a question about the rows — see
+*what the fold would otherwise hide*, below.
+
+### Every state is read from a commit, and nothing is written to its repository
+
+Each state is materialised as a **clone**, checked out detached at its own
+commit, and indexed there. Three consequences, and each is the point:
 
 - The working tree is never checked out over. The comparison runs from the
   branch you are standing on.
-- Neither reading carries anything its commit does not. A working tree holds
+- No reading carries anything its commit does not. A working tree holds
   whatever is lying around in it, and differencing a clean checkout against a
   working tree reports somebody's scratch file as something the second state
   added.
+- **The repository a state comes from is not written to.** `git worktree add`
+  writes to the repository it is run in; a clone does not. A state can come
+  from a repository this project is allowed to read and not to touch, and a
+  materialisation that wrote to one repository and not to another would also be
+  two kinds of reading.
 
-The worktree is removed afterwards, including when the index run raises.
+The clone is removed afterwards, including when the index run raises.
 
-### Both absolute figures, beside every delta
+### Every absolute figure, beside every delta
 
 Subtraction hides which side moved. `+40` cannot distinguish *the second state
 added forty* from *the first state was miscounted by forty*, and the second is
-the failure mode this project has already had twice. So every row carries three
-numbers, and the sections that list rows by name carry a fourth thing: a total
-over every name at delta 0, computed over all of them rather than over the ones
-that fit under the cap.
+the failure mode this project has already had twice. With three states it
+cannot even say which pair moved. So every row carries every state's own figure,
+and the sections that list rows by name carry one more thing: a total over every
+name at delta 0, computed over all of them rather than over the ones that fit
+under the cap.
+
+### Bytes walked, beside files walked
+
+`bytes walked` is the walk's own weight for the same files `files walked`
+counts, each entry taken by `lstat` so a symlink weighs its own name and never
+the file it names. Two states holding the same number of files can hold ten
+times the bytes, and a count of files says which of those a repository is about
+as well as a count of pages says how long a book is.
+
+It is printed beside `surface bytes` and nothing divides them. Spec 0002 §11
+refuses a metric built for a hypothesis before the hypothesis was measured, so
+a share of one by the other is a reading somebody takes off the table, not a
+number this tool computes, ranks or raises anything on.
 
 ### Two names for one file are one file
 
@@ -965,6 +1013,17 @@ The fold happens at compare time, off the `link_target` column, and **the number
 folded is reported per state** — beside the counts, never inside them. A fold
 that happens in one state and not the other is exactly what moves a zero, and
 one summed figure would hide which state it happened in.
+
+### What the fold would otherwise hide
+
+Printed beside the fold: how many names in each state resolve to another name,
+and what those names weigh. Fourteen 32-byte links and fourteen full-sized
+copies of the files those links used to name are different repositories, and
+after the fold both read as fourteen names counted once — which is the right
+answer to *how many files is this* and no answer at all to *is this still the
+same base*. A copy that no longer tracks its source is a rewritten base whatever
+a diff says, so the figure that tells the two apart is printed rather than left
+to be worked out by hand.
 
 **Only a link folds.** Rows here are additive on purpose and several of them
 legitimately stand at one path: a settings file holds a row per hook and a row
@@ -1009,9 +1068,9 @@ alone belongs to that function rather than to each command that prints it.
 
 | exit | means |
 |---|---|
-| 0 | The comparison ran and its two readings are comparable. |
-| 1 | A state could not be materialised, indexed or read. Nothing is printed to stdout: half a table is the one output shape this command must not produce. |
-| 4 | The comparison ran and the two states were read by **different detector sets**. The table is printed and every figure in it was measured; what is not established is that subtracting them means anything. |
+| 0 | The comparison ran and its readings are comparable. |
+| 1 | A state could not be materialised, indexed or read, or fewer than two states were named. Nothing is printed to stdout: half a table is the one output shape this command must not produce. |
+| 4 | The comparison ran and its states were **not all read by one detector set**. The table is printed and every figure in it was measured; what is not established is that subtracting them means anything. |
 
 ### What it does not do
 

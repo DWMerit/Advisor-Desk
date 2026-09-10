@@ -288,6 +288,12 @@ class WalkedFile:
     # it. A row that did not come through the walk has no entry to carry --
     # see `_hook_target_row`, the one such row this module writes.
     non_regular: bool = False
+    # What the entry weighs, taken by `lstat` -- so a link weighs its own name
+    # and never the file it names, which is the same figure `read_candidate`
+    # takes the same way and GitLab take at `crates/utils/src/walk.rs:47`.
+    # Zero for an entry the walk listed and could not size, which is the only
+    # state where this is not the file's own length.
+    size_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -467,13 +473,30 @@ def walk_files(repo_root: Path, nested_repos: list[Path] | None = None) -> list[
                 continue
             if not entry.is_file():
                 continue
-            found.append(WalkedFile(entry.relative_to(repo_root).as_posix(), entry))
+            found.append(WalkedFile(entry.relative_to(repo_root).as_posix(), entry,
+                                    size_bytes=_size(entry)))
     return sorted(found, key=lambda walked: walked.relative_path)
 
 
 def _listed(entry: Path, root: Path) -> WalkedFile:
     """One node the walk lists without opening."""
-    return WalkedFile(entry.relative_to(root).as_posix(), entry, non_regular=True)
+    return WalkedFile(entry.relative_to(root).as_posix(), entry, non_regular=True,
+                      size_bytes=_size(entry))
+
+
+def _size(entry: Path) -> int:
+    """What one walked entry weighs, by the link's own name where it is one.
+
+    ``lstat`` for every entry rather than only for a link: for a regular file it
+    is the same figure, and one call means the walk cannot size two kinds of
+    entry by two rules. An entry that is gone between the listing and the stat
+    weighs nothing here; what it is, and that it could not be read, is recorded
+    by the row `read_candidate` writes for it.
+    """
+    try:
+        return entry.lstat().st_size
+    except OSError:
+        return 0
 
 
 def files_by_suffix(walked_files: list[WalkedFile]) -> dict[str, int]:
@@ -504,6 +527,17 @@ def files_by_directory(walked_files: list[WalkedFile]) -> dict[str, int]:
         parts = PurePosixPath(walked.relative_path).parts
         tally[parts[0] if len(parts) > 1 else ""] += 1
     return dict(tally)
+
+
+def bytes_walked(walked_files: list[WalkedFile]) -> int:
+    """What the walk reached, in bytes, by the sizes it took as it went.
+
+    The denominator a share of bytes is read against, and it is the walk's own
+    figure for the same reason the two tallies above are: a second pass to
+    weigh the tree would weigh a tree that has moved on, and the difference
+    between two states is exactly where that would show.
+    """
+    return sum(walked.size_bytes for walked in walked_files)
 
 
 def link_target(repo_root: Path, relative_path: str) -> str | None:
