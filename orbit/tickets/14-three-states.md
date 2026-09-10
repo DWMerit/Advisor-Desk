@@ -61,6 +61,42 @@ Gate A and Gate B keep their rules unchanged, including that the three Gate A
 questions are written down **before** the data is examined, and that "not built"
 is a recorded result.
 
+## Measured before this ticket ran — vocabulary, 2026-09-10
+
+C2 is cloned at `/home/user/agent-rules-books` (`782a886`, 515 tracked files:
+386 Markdown, 51 JSON, 35 Python). It holds no Orbit implementation. Our
+vocabulary was measured against it before the comparison, so a term appearing in
+both is a reading taken on purpose rather than a surprise mid-run.
+
+**Every compound identifier we use appears in zero of its files.** All of
+`instruction-surface`, `skill-package`, `agent-definition`,
+`command-definition`, `hook-definition`, `hook-target`, `mcp-config`,
+`no-indexed-target-match`, `outside-indexed-roots`, `unresolvable-scheme`,
+`bare-path-literal`, `frontmatter-field`, `import-statement`, `config-value`,
+`supersedes-claim`, `markdown-link`, `artifact-header`,
+`manifest-declaration`, `literal-write-path`, `rung_of`, `external_ref`,
+`index_run`, `coverage_note`, `gl_context`, `surface_kind`. The compound shape
+of the names is what makes them unambiguous; nothing else was needed.
+
+**Our single English words appear throughout, as English.** `surface` in 66 of
+515 files — "reliably surface defects", "a large surface with minor helpers" —
+and `contains` 47, `references` 41, `produces` 36, `clause` 15. These were never
+identifiers. A count of them says nothing about either graph.
+
+**One term is shared with a different meaning.**
+`.claude/skills/video-harvest/SKILL.md` runs its own provenance scheme:
+`SOURCE: SCREEN-READ` or `SOURCE: INFERRED`, with a named failure,
+`source_out_of_contract`, for a model that "graded its own evidence instead of
+saying whether it read the frame". `INFERRED` appears in 7 files and `UNKNOWN`
+in 4 under that scheme. `OBSERVED` and `DECLARED` appear in none.
+
+**Recorded, not designed against.** Two repositories reaching for the same word
+for the same idea is an observation about the estate, and plausibly a symptom of
+the layer this project exists to decompose rather than a naming fault to
+engineer around. Candidate B is still gated, and whatever ticket 07 decides
+about evidence columns it now decides knowing this. Nothing here changes a
+detector, a name, or a gate.
+
 ## The pass mark, set before any data
 
 **If Orbit cannot show a measurable difference between C0, C1 and C2, it does not
