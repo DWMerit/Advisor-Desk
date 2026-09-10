@@ -126,6 +126,20 @@ properties:
     mutable: false
     description: "Distinct file paths carrying at least one surface row. Distinct paths rather than rows, because a settings file holds a row per hook and would otherwise count several times against a denominator of files. Subtracted from files_walked, this is how many files these detectors recognise nothing in."
 
+  files_walked_by_suffix:
+    type: string
+    source: files_walked_by_suffix
+    nullable: false
+    mutable: false
+    description: "The walk's own tally of files_walked by filename suffix, as a JSON object keyed by the suffix including its dot, with the empty string for a name that carries none. Recorded because a count read back out of the graph cannot be broken down afterwards without walking the tree again, and a second walk at that point would be taken against a tree that has moved on -- the difference between two states is exactly where that would show. JSON rather than a joined list because a suffix is the estate's own text and can hold the separator."
+
+  files_walked_by_directory:
+    type: string
+    source: files_walked_by_directory
+    nullable: false
+    mutable: false
+    description: "The same tally by top-level directory, as a JSON object keyed by the first path segment, with the empty string for a file at the repository root. What it answers is where a difference between two snapshots landed: a delta on its own cannot say whether one directory grew or every directory moved a little, and those are different findings."
+
 storage:
   settings:
     index_granularity: "1024"
@@ -143,6 +157,8 @@ storage:
     - {name: excluded_directories, type: "String", codec: ["ZSTD(3)"]}
     - {name: files_walked, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: files_with_surface_kind, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: files_walked_by_suffix, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: files_walked_by_directory, type: "String", default: "''", codec: ["ZSTD(3)"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

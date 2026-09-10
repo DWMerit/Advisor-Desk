@@ -170,6 +170,14 @@ properties:
     description: "in-tree | path-lookup | no-indexed-target-match | unexpanded-variable | unparsable-command. NULL for surfaces that are not hook definitions."
     selectivity: low
 
+
+  link_target:
+    type: string
+    source: link_target
+    nullable: true
+    mutable: false
+    description: "Repository-relative path this row's own name resolves to, where the row is a symlink whose target is inside this repository. Empty where the row is a link that resolves outside the repository or to nothing, and NULL for a row that is not a link. Read from the link itself, never from the file it names: a name is readable without opening anything, and a symlink is listed as a node and never read. It is here so that two names for one file can be counted once, labelled by the target -- GitLab Orbit's own rule at crates/orbit-local/src/commands/setup.rs:265-271 -- without a later reader having to walk the tree again to find out which two names those were. Note what it is not: same-inode is a stronger statement than the byte identity IDENTICAL_BYTES carries, and it orders nothing that hashing left unordered."
+
   content:
     type: string
     virtual:
@@ -210,6 +218,7 @@ storage:
     - {name: matcher, type: "String", codec: ["ZSTD(1)"]}
     - {name: target_path, type: "String", codec: ["ZSTD(3)"]}
     - {name: target_resolution, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: link_target, type: "String", codec: ["ZSTD(3)"]}
     - {name: reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}

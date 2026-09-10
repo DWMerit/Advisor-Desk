@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -159,6 +159,15 @@ def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
         "matcher": detected.matcher,
         "target_path": detected.target_path,
         "target_resolution": detected.target_resolution,
+        # Where this row's own name resolves, for a row that is a link. Read
+        # from the link and not through it, so a node the walk listed is still
+        # a node nothing opened. It is what lets two names for one file be
+        # counted once later, without a reader re-walking the tree to find out
+        # which two names those were.
+        "link_target": (
+            surfaces.link_target(repo.root, detected.relative_path)
+            if detected.non_regular else None
+        ),
         "reason": detected.reason,
     }
     # Columns added to the YAML but not yet populated by a detector land as
@@ -532,12 +541,19 @@ def _now() -> datetime:
 
 def _run_row(node: NodeType, repo: Repository, indexed_root: Path,
              indexed_at: datetime,
-             files_walked: int, files_with_surface_kind: int) -> dict:
+             files_walked: int, files_with_surface_kind: int,
+             walked: list[surfaces.WalkedFile]) -> dict:
     """The one row saying what this run covered, and which detectors read it.
 
     ``files_with_surface_kind`` counts distinct paths, not rows: a settings file
     holds a row per hook, and counting rows against a denominator of files would
     put coverage above one on an estate with enough hooks.
+
+    The two tallies beside them are the same walk broken down by suffix and by
+    top-level directory. They are written here, from the walk's own answer,
+    because nothing downstream can recover them: a reader holding only
+    ``files_walked`` and wanting to know how many of them were Markdown has to
+    walk the tree a second time, against a tree that has moved on since.
     """
     values = {
         "id": stable_id(repo.project_id, repo.branch, repo.commit_sha, INDEX_RUN_NODE),
@@ -552,6 +568,15 @@ def _run_row(node: NodeType, repo: Repository, indexed_root: Path,
         "excluded_directories": ", ".join(sorted(surfaces.PRUNED_DIRECTORIES)),
         "files_walked": files_walked,
         "files_with_surface_kind": files_with_surface_kind,
+        # JSON rather than a joined list: a suffix and a directory name are the
+        # estate's own text, and either can hold whatever separator a joined
+        # list would pick.
+        "files_walked_by_suffix": json.dumps(
+            surfaces.files_by_suffix(walked), sort_keys=True
+        ),
+        "files_walked_by_directory": json.dumps(
+            surfaces.files_by_directory(walked), sort_keys=True
+        ),
     }
     return {name: values.get(name) for name in node.column_names}
 
@@ -708,7 +733,8 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
         (tables[run_node.table],
          [_run_row(run_node, repo, indexed_root or repo.root,
                    indexed_at or _now(),
-                   result.files_walked, result.files_with_surface_kind)]),
+                   result.files_walked, result.files_with_surface_kind,
+                   walked)]),
         (tables[coverage_node.table],
          _coverage_rows(coverage_node, repo, result.coverage)),
     ):

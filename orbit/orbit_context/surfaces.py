@@ -476,6 +476,62 @@ def _listed(entry: Path, root: Path) -> WalkedFile:
     return WalkedFile(entry.relative_to(root).as_posix(), entry, non_regular=True)
 
 
+def files_by_suffix(walked_files: list[WalkedFile]) -> dict[str, int]:
+    """The walk's own tally, by filename suffix.
+
+    Recorded on the run row because a count read back out of the graph cannot be
+    broken down afterwards without walking the tree again -- and the tree a
+    second walk would reach is not the one this count was taken against. The
+    empty string is a name carrying no suffix at all; it is a key rather than a
+    word, so nothing here has to decide what to call one.
+    """
+    tally: dict[str, int] = defaultdict(int)
+    for walked in walked_files:
+        tally[PurePosixPath(walked.relative_path).suffix] += 1
+    return dict(tally)
+
+
+def files_by_directory(walked_files: list[WalkedFile]) -> dict[str, int]:
+    """The same tally, by top-level directory.
+
+    One segment, not the whole directory path: what this answers is *where* a
+    difference between two snapshots landed, and a delta on its own cannot tell
+    "one directory grew by fifty" from "every directory moved a little". The
+    empty string is a file sitting at the repository root.
+    """
+    tally: dict[str, int] = defaultdict(int)
+    for walked in walked_files:
+        parts = PurePosixPath(walked.relative_path).parts
+        tally[parts[0] if len(parts) > 1 else ""] += 1
+    return dict(tally)
+
+
+def link_target(repo_root: Path, relative_path: str) -> str | None:
+    """Where a link's own name resolves, repository-relative, or None.
+
+    Read from the link, never through it: ``readlink`` and a path calculation,
+    with no read of the file the link names. A symlink is a node this walk lists
+    and never opens, and that holds here too.
+
+    Empty rather than None where the row *is* a link and its target is outside
+    the repository or is not there: those are links whose second name this
+    repository does not hold, and folding them onto a path outside the snapshot
+    would put a file in the count that no row of it covers. None is the answer
+    for a row that is not a link at all.
+    """
+    absolute = repo_root / relative_path
+    try:
+        if not absolute.is_symlink():
+            return None
+        resolved = absolute.resolve()
+    except OSError:
+        return None
+    try:
+        return resolved.relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return ""
+
+
 def first_heading(text: str) -> str:
     """The file's first Markdown heading line, or empty where it has none."""
     for line in text.splitlines():

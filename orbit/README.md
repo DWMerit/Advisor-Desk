@@ -69,6 +69,13 @@ supports or an explicit UNKNOWN and the reason there is none:
 orbit/bin/orbit-context pairs --repo /path/to/the/repository
 ```
 
+Or difference two states of one repository — index each, subtract, and print
+both states' own figures beside every delta:
+
+```sh
+orbit/bin/orbit-context compare main HEAD --repo /path/to/the/repository
+```
+
 Or ask one book for its ladder — every rung it was written at, largest first:
 
 ```sh
@@ -684,10 +691,14 @@ So, here:
   directory around it, and a file nobody opened is evidence of neither. So it
   sums to `surfaces read in full`, not to `files carrying a surface kind`.
 
-Two names for one file still count as two nodes here. Folding them to one,
-labelled by the target (`crates/orbit-local/src/commands/setup.rs:265-271`), is
-a stronger statement than byte identity and belongs with the comparison, where
-two states can disagree about it.
+Two names for one file still count as two nodes here, and the row carries
+`link_target`: where the link's own name resolves, repository-relative, read
+from the link and never through it. Folding them to one entry labelled by the
+target (`crates/orbit-local/src/commands/setup.rs:265-271`) is a stronger
+statement than byte identity, and it is applied by `compare` — where two states
+can disagree about it — rather than by the walk. So the graph holds both names
+and the comparison counts one file, which is the arrangement that lets the
+number folded be reported per state instead of vanishing into a total.
 
 Every one of these also lands in `gl_context_coverage`, keyed to the snapshot,
 so `repo-map` can report what was reached and not read without re-walking the
@@ -899,6 +910,141 @@ this tool could not attach is not the same as a rung never written.
 
 How many rungs a book carries is an observation, not a defect. A book at two is
 reported at two, beside the books at three.
+
+## Two states of one repository, differenced
+
+`compare` takes two git refs, indexes each, and prints the difference with both
+states' own figures beside every delta.
+
+```sh
+orbit/bin/orbit-context compare main HEAD --repo /path/to/the/repository
+```
+
+A comparison is two indexes plus subtraction, and it is built as exactly that.
+It has **no store of its own, no index path of its own and no query language of
+its own** — spec 0002 §12 lists each of those as a kill condition, because each
+would mean the figures in this table were taken differently from the figures
+every other command prints.
+
+### Both states are read from a commit
+
+Each state is materialised with `git worktree add --detach` and indexed there.
+Two consequences, and both are the point:
+
+- The working tree is never checked out over. The comparison runs from the
+  branch you are standing on.
+- Neither reading carries anything its commit does not. A working tree holds
+  whatever is lying around in it, and differencing a clean checkout against a
+  working tree reports somebody's scratch file as something the second state
+  added.
+
+The worktree is removed afterwards, including when the index run raises.
+
+### Both absolute figures, beside every delta
+
+Subtraction hides which side moved. `+40` cannot distinguish *the second state
+added forty* from *the first state was miscounted by forty*, and the second is
+the failure mode this project has already had twice. So every row carries three
+numbers, and the sections that list rows by name carry a fourth thing: a total
+over every name at delta 0, computed over all of them rather than over the ones
+that fit under the cap.
+
+### Two names for one file are one file
+
+GitLab Orbit's rule, at `crates/orbit-local/src/commands/setup.rs:265-271`: the
+paths are canonicalised and one entry is kept, labelled by the **target**. Their
+test at `:292` writes `AGENTS.md`, symlinks `CLAUDE.md` to it, and asserts one
+entry named `AGENTS.md`.
+
+It matters here because the row this comparison turns on is a zero. Fourteen
+symlinked `full.md` files sit in both states of this repository; counted as
+governance in one state and not the other, the zero moves and the comparison
+reports a session adding rules it did not write.
+
+The fold happens at compare time, off the `link_target` column, and **the number
+folded is reported per state** — beside the counts, never inside them. A fold
+that happens in one state and not the other is exactly what moves a zero, and
+one summed figure would hide which state it happened in.
+
+What the fold is not: same-inode is a stronger statement than the byte identity
+`IDENTICAL_BYTES` carries. Byte-identical says *same content, cause unknown*;
+same-inode says *same file*. So the target being the surviving name is observed,
+and it reopens nothing — two files that merely hash the same are still
+unordered.
+
+### Where the walk's own tally comes from
+
+`files walked` breaks down by suffix and by top-level directory because the run
+row carries those two tallies — `files_walked_by_suffix` and
+`files_walked_by_directory`, JSON objects written by the walk that produced the
+count. Recorded rather than recomputed, on `repo-map`'s rule: a second walk at
+compare time would be a second answer to "what is in this repository", taken
+against a tree that has moved on, and the difference between two states is
+exactly where that would show.
+
+### The exit code is a finding as well as a status
+
+| exit | means |
+|---|---|
+| 0 | The comparison ran and its two readings are comparable. |
+| 1 | A state could not be materialised, indexed or read. Nothing is printed to stdout: half a table is the one output shape this command must not produce. |
+| 4 | The comparison ran and the two states were read by **different detector sets**. The table is printed and every figure in it was measured; what is not established is that subtracting them means anything. |
+
+### What it does not do
+
+Nothing is characterised. The deltas are counts and bytes, and no row says what
+a difference means, which state is the better one, or what to do about either.
+Spec 0002 §12's last kill condition is reaching for the comparison to decide
+something rather than to check something.
+
+### The acceptance run
+
+Advisor-Desk against its own history, hand-checked against the shape ticket 13
+pinned **before** the run:
+
+```
+orbit-context compare a7d7649 e6a6d74 --repo .
+
+COUNTS  both figures beside every delta  [1.8eabab386316]
+  state                                  a7d7649  e6a6d74  delta
+  files walked                               201      253    +52
+  files carrying a surface kind, folded       87       87      0
+  governance surfaces                         87       87      0
+  of those, read in full                      87       87      0
+  two names for one file, folded              14       14      0
+  clauses                                   7560     7560      0
+  pointers                                   224      224      0
+  governance surface bytes                781674   781674      0
+
+FILES BY SUFFIX
+  .md                             198      209    +11
+  .py                               0       31    +31
+  .yaml                             0        9     +9
+
+FILES BY TOP-LEVEL DIRECTORY
+  orbit                             0       52    +52
+  every directory that did not move  201      201      0
+```
+
+Every row the ticket pinned by hand is reproduced: 201 files against 253, 198
+Markdown against 209, 201 non-`orbit/` files either side, and **governance
+surfaces at 87 in both states**. That last row is the finding. C1 built a tool
+and added no governance, and the comparison says so — with the fourteen `full.md`
+links folded in both states rather than in one, which is what keeps the zero a
+measurement instead of an artefact of when the fold happened.
+
+`a7d7649` is `main`: 50 commits, every one authored upstream. `e6a6d74` is the
+state ticket 13 was written against. **The branch has moved since**, and running
+the same comparison against today's head is a different measurement — the
+sessions after `e6a6d74` installed skill packages under `.claude/`, which is
+governance, added outside `orbit/`. Both runs are correct and they answer
+different questions; the pinned one is the falsifier, because its expected
+values were written down before it was run.
+
+This is evidence, not a test. `orbit/tests/test_compare.py` asserts against
+`build_states`, a fixture repository committed at three states, because a test
+that reads live repository content fails whenever that content changes —
+including from this work.
 
 ## Statistics
 

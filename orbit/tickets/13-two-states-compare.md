@@ -61,14 +61,14 @@ that merely hash the same are still unordered, and nothing here changes that.
 
 ## Acceptance
 
-- [ ] C0 is indexed without checking anything out over the working tree
-- [ ] The delta table above is reproduced, including the zero
-- [ ] Both states carry the same detector version, and the output states it
-- [ ] The comparison runs from the command line and its exit code is meaningful
-- [ ] Deltas are counts and bytes; nothing is characterised
-- [ ] Two names for one file count once, labelled by the target, and the number
+- [x] C0 is indexed without checking anything out over the working tree
+- [x] The delta table above is reproduced, including the zero
+- [x] Both states carry the same detector version, and the output states it
+- [x] The comparison runs from the command line and its exit code is meaningful
+- [x] Deltas are counts and bytes; nothing is characterised
+- [x] Two names for one file count once, labelled by the target, and the number
       folded is reported per state rather than absorbed into the total
-- [ ] Output contains no forbidden vocabulary word
+- [x] Output contains no forbidden vocabulary word
 
 ## Watch for
 
@@ -79,3 +79,99 @@ failure mode that has already happened twice in this project.
 
 Do not let the comparison acquire its own store, its own query language or a
 second index path. Spec 0002 §12 lists each of those as a kill condition.
+
+## What the run found
+
+`orbit-context compare a7d7649 e6a6d74 --repo .`, detector set `1.8eabab386316`,
+both states read by it:
+
+| | C0 `a7d7649` | C1 `e6a6d74` | delta |
+|---|---|---|---|
+| files walked | 201 | 253 | +52, every one under `orbit/` |
+| files outside `orbit/` | 201 | 201 | **0** |
+| markdown | 198 | 209 | +11 |
+| governance surfaces | 87 | 87 | **0** |
+| two names for one file, folded | 14 | 14 | 0 |
+| clauses | 7,560 | 7,560 | 0 |
+| pointers | 224 | 224 | 0 |
+| governance surface bytes | 781,674 | 781,674 | 0 |
+
+Every row pinned in advance is reproduced, including both zeroes. **C1 added no
+governance**, and the comparison says so.
+
+### The 87 ties back to named files
+
+Spec 0002 §9: a number that cannot be tied back to named files is not a result.
+101 surface rows at C0, folded to 87:
+
+| group | rows |
+|---|---|
+| published rule files — 14 books at 3 rungs, each `declared-marker` | 42 |
+| `_rule-workbench/` files read — 42 `declared-marker`, 3 `corpus-adjacent` | 45 |
+| `_rule-workbench/<book>/full.md` links, folded into the book each names | 14 |
+
+42 + 45 = **87**, and 87 + 14 = the 101 rows the store holds. Both figures come
+off ticket 08's hand count, which already had the 42, the 45 and the 14
+separately. `docs/`'s 95 files carry no governance in either state, which is the
+answer the corpus rule is supposed to give for a documentation tree.
+
+### C1 has moved on since this ticket was written
+
+`e6a6d74` is the state the table above was pinned against — 253 files, 201 of
+them outside `orbit/`. The branch has moved well past it since, and the sessions
+that moved it installed skill packages under `.claude/`. Those are governance,
+added outside `orbit/`, so the same comparison run against the branch head
+reports governance added — and is right to. Two correct answers to two different
+questions; the pinned one is the falsifier, because its expected values were
+written down before it was run.
+
+Run against the head this ticket was built on, `87b6249`:
+
+| | C0 `a7d7649` | head `87b6249` | delta |
+|---|---|---|---|
+| files walked | 201 | 320 | +119 |
+| governance surfaces | 87 | 103 | +16 |
+| two names for one file, folded | 14 | 14 | 0 |
+| `.claude/` files | 0 | 48 | +48 |
+| `orbit/` files | 0 | 70 | +70 |
+| every other directory | 196 | 196 | 0 |
+
+The sixteen are named, not inferred: sixteen `skill-package` rows, one per
+`.claude/skills/<name>/SKILL.md`, and nothing else. The corpus is still
+untouched — every directory holding a book is at delta 0, and so are `docs/` and
+`_rule-workbench/`.
+
+## Decisions taken here
+
+**Both states are read from a commit, not one of them from the working tree.**
+The ticket asks for C0 in a detached worktree. C1 is materialised the same way,
+because a working tree carries whatever is lying around in it and differencing a
+clean checkout against one would report somebody's scratch file as something the
+session added. Two readings have to be the same kind of reading before their
+difference means anything.
+
+**Two columns were added, and neither is a detector.** `link_target` on
+`gl_context_surface` is where a link's own name resolves, read from the link and
+never through it; `files_walked_by_suffix` and `files_walked_by_directory` on
+`gl_context_run` are the walk's own tally, so the markdown row and the
+per-directory row come out of the graph rather than out of a second walk. The
+detector set version is unmoved by all three, which was checked rather than
+assumed: `detectors.py` hashes the module-level constants and patterns of the
+five detector modules, and a column added to the YAML is not one.
+
+**The fold happens at compare time, not at index time.** The graph keeps both
+names — ticket 15's rule, a symlink is a node — and the comparison counts one
+file. That is what lets the number folded be reported per state instead of
+disappearing into the walk, and it keeps the two questions apart: what the
+repository holds, and how many files those names are.
+
+**Exit code 4 is a finding.** 0 is a comparison whose readings are comparable, 1
+is a state that could not be read, and 4 is two states read by different detector
+sets — the table still prints and every figure in it was measured; what is not
+established is that subtracting them means anything. 1 prints nothing at all to
+stdout: half a table is the one shape this command must not produce.
+
+**The zero was shown not to be structural.** `build_states` commits a third
+state that does add governance, and the same comparison reports it. A comparison
+that returned "no governance added" whatever was added would satisfy this
+ticket's headline row while measuring nothing.

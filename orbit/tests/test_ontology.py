@@ -32,18 +32,22 @@ class TestSurfaceYaml(unittest.TestCase):
         self.assertTrue(self.node.table.startswith("gl_context_"))
 
     def test_declared_columns(self):
-        # `recognition` is the one addition since phase 1, made by ticket 10:
-        # recognition stopped being a single rule, so how a surface was found
-        # stopped being derivable from the fact that it was found. Every other
-        # column here is phase 1's. This assertion is the reason the addition
-        # could not be made quietly, which is what it is for.
+        # Two additions since phase 1, and this assertion is the reason neither
+        # could be made quietly -- which is what it is for.
+        #
+        # `recognition`, by ticket 10: recognition stopped being a single rule,
+        # so how a surface was found stopped being derivable from the fact that
+        # it was found. `link_target`, by ticket 13: where a link's own name
+        # resolves, so that two names for one file can be counted once without
+        # a later reader walking the tree again to find out which two names
+        # those were. Every other column here is phase 1's.
         self.assertEqual(
             self.node.column_names,
             ("id", "traversal_path", "project_id", "branch", "commit_sha",
              "path", "name", "surface_kind", "recognition", "content_sha256",
              "size_bytes", "frontmatter_bytes",
              "body_bytes", "start_line", "end_line", "matcher", "target_path",
-             "target_resolution", "reason"),
+             "target_resolution", "link_target", "reason"),
         )
 
     def test_virtual_content_is_not_stored(self):

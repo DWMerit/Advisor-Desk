@@ -1,12 +1,20 @@
 """``orbit-context`` — the context-domain indexer for Orbit's local graph.
 
-Six commands. ``index`` writes the graph; ``migrate`` brings an existing store
+Seven commands. ``index`` writes the graph; ``migrate`` brings an existing store
 to the ontology when the two have parted; ``show`` reads one clause back out of
 the file it came from, at the byte offsets the graph recorded; ``repo-map``
 prints one repository's governance surface, read from the graph, inside a stated
 budget; ``ladder`` walks the ``RUNG_OF`` edges of one book and prints its rungs
 in size order; ``pairs`` prints every byte-identical pair with the direction its
-evidence supports, or an explicit UNKNOWN and the reason there is none.
+evidence supports, or an explicit UNKNOWN and the reason there is none;
+``compare`` indexes two states of one repository and prints the difference
+between them, with both states' own figures beside every delta.
+
+Exit codes carry findings as well as failures. ``show`` returns 2 for an
+ambiguous address and 3 for an index the file has moved on from; ``compare``
+returns 4 for two states whose readings are not comparable -- the table is
+printed and every figure in it was measured, and what is not established is
+that subtracting them means anything.
 
 ``show`` writes the clause's bytes to stdout and nothing else, so what comes out
 is the span of the file and can be compared to it byte for byte; the locator
@@ -19,6 +27,7 @@ import argparse
 import json
 import sys
 
+from . import compare as compare_module
 from . import history, ladders, pairs, repomap, retrieve, store
 from .indexer import index, migrate
 from .ontology import OntologyError
@@ -160,6 +169,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
         help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
     )
+
+    compare_parser = subparsers.add_parser(
+        "compare",
+        help="Index two states of one repository and print the difference, "
+             "with both states' own figures beside every delta",
+    )
+    compare_parser.add_argument(
+        "before", help="The state differenced from: any git ref or commit",
+    )
+    compare_parser.add_argument(
+        "after", help="The state differenced to: any git ref or commit",
+    )
+    compare_parser.add_argument(
+        "--repo", dest="repo", default=".",
+        help="A path inside the repository holding both states (default: the "
+             "working directory). Each state is checked out into a detached "
+             "worktree beside it and indexed there, so the working tree is "
+             "never checked out over.",
+    )
+    compare_parser.add_argument(
+        "--ontology", dest="ontology_root", default=None,
+        help="Override the ontology root (default: orbit/ontology)",
+    )
+    compare_parser.add_argument(
+        "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
+        help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
+    )
     return parser
 
 
@@ -257,6 +293,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"orbit-context: {error}", file=sys.stderr)
             return 1
         return 0
+
+    if args.command == "compare":
+        try:
+            report, comparable = compare_module.compare_text(
+                args.repo, args.before, args.after,
+                db_path=args.db_path, ontology_root=args.ontology_root,
+            )
+        except (compare_module.CompareError, OntologyError, StoreError,
+                GitError) as error:
+            # Nothing on stdout. A comparison that could not read one of its two
+            # states has no table to print, and half a table is the one output
+            # shape this command must never produce.
+            print(f"orbit-context: {error}", file=sys.stderr)
+            return 1
+        print(report, end="")
+        # A finding, not a failure: the table stands, and what it does not
+        # establish is that the two readings can be subtracted.
+        return 0 if comparable else compare_module.EXIT_NOT_COMPARABLE
     return 1
 
 
