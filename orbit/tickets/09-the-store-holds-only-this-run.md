@@ -87,16 +87,35 @@ the guard the section below asks for, run automatically rather than by hand.
 
 ## Acceptance
 
-- [ ] Every `gl_context_*` table's columns match its ontology YAML exactly, and a
+- [x] Every `gl_context_*` table's columns match its ontology YAML exactly, and a
       mismatch either fails the run naming the remedy or migrates, by a decision
       recorded in this ticket
-- [ ] The four pre-gate columns are gone from the store
-- [ ] Index output lists every repository in the store — branch, commit, index
+      — a failed run, decided above. `store.assert_matches_ontology` stops
+      `index` before a row is written; `orbit-context migrate` is the remedy it
+      names. `tests/test_store_contents.py::TestDriftFailsTheRun`.
+- [x] The four pre-gate columns are gone from the store
+      — `migrate --remove-values` run against `~/.orbit-context/context.duckdb`.
+      `gl_context_surface` now carries the 18 columns `surface.yaml` declares and
+      no others. The three prototype rows that held them, GitLab Orbit's own at
+      `0fe19ac`, were removed separately as a row decision, and
+      `rows_outside_a_recorded_run` is now empty.
+- [x] Index output lists every repository in the store — branch, commit, index
       time, detector version — not only the one indexed
-- [ ] Re-indexing one repository leaves the others' rows untouched, and the
+      — the `store` block, from `store.snapshots`. `indexed_at` is new on
+      `index_run.yaml`; the rest was already recorded and merely unreadable. Each
+      entry also carries its rows per table and whether this run wrote it.
+- [x] Re-indexing one repository leaves the others' rows untouched, and the
       output says which rows it replaced
-- [ ] Rows written under a different detector version are distinguishable from
+      — `replace_rows` returns what its DELETE took, reported as `replaced` per
+      table, per repository and across the run. The full snapshot key is what
+      keeps the write off other repositories' rows.
+      `tests/test_store_contents.py::TestReindexingLeavesTheOthersAlone`.
+- [x] Rows written under a different detector version are distinguishable from
       rows written under the current one
+      — every context row shares its snapshot key with a `gl_context_run` row,
+      which carries the version, and no row is left outside one. The store block
+      marks each snapshot `detector_set_is_current` and counts
+      `repositories_from_other_detector_sets`.
 
 ## Watch for
 
@@ -105,3 +124,34 @@ noticing. Before and after the rebuild, the counts for surfaces, clauses, edges,
 pointers and identical-byte pairs must be identical — those four columns carry no
 count. If any of them moves, something else changed at the same time and it needs
 finding before ticket 10 starts.
+
+**Checked, and nothing moved.** Against the real store, either side of
+`migrate --remove-values`:
+
+| | before | after |
+|---|---:|---:|
+| `gl_context_surface` | 3 | 3 |
+| `gl_context_clause` | 0 | 0 |
+| `gl_context_edge` | 28 | 28 |
+| `gl_context_external_ref` | 0 | 0 |
+| `gl_context_run` | 1 | 1 |
+| `gl_context_coverage` | 0 | 0 |
+
+The migration report carries the same two figures per table, so this is a check
+the command runs on itself rather than one that has to be remembered.
+
+## The baseline ticket 10 is measured against
+
+Recorded here because it is only trustworthy now. Advisor-Desk, detector set
+`1.4e7b60b9df23`, on the migrated store:
+
+| | |
+|---|---:|
+| files walked | 247 |
+| files with a surface kind | **0** |
+| surfaces · clauses · pointers | 0 · 0 · 0 |
+| edges | 28 |
+
+The 28 edges are byte-identity and provenance, which need no surface. Recognition
+of this repository's governance is the whole of that zero, and moving it is ticket
+10.
