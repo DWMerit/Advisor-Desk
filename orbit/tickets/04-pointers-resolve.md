@@ -40,6 +40,30 @@ finding rather than forty. Every one of the 52 was a path the estate had actuall
 written; none was a fragment. That test runs on every suite run, against whatever
 repository the code is sitting in, so the boundary rules cannot silently rot.
 
+**The ceiling became a share, 2026-09-10.** The absolute ceiling of 100 addresses
+was calibrated when this repository was a book corpus. It breached at 125 the day
+the repository also held documentation about a file-handling tool — prose that
+names files for a living, including files that do not exist here by definition,
+because the detector's own basename table is `CLAUDE.md`, `GEMINI.md`,
+`.cursorrules`. That breach said the repository had grown, not that the detectors
+had degraded, and a guard that fires on growth stops being read.
+
+Two corrections came with it. The old pair compared distinct unmatched addresses
+against resolved *occurrences* — two units either side of one ratio, which
+flattered the reading by roughly six times. Both sides are now distinct
+addresses. And thirty-nine bare filenames in this project's own tickets and specs
+were rewritten to repository-root paths, because `orbit/orbit_context/compare.py`
+written as `compare.py` inside a ticket resolves against the ticket's own
+directory and finds nothing. That was a real defect in the documentation, fixed
+at the source rather than absorbed by the ceiling.
+
+Reading when the share was set: **98 of 341 distinct addresses did not resolve,
+28.7%**, against a ceiling of one in three. Of the 98, thirty-two are correctly
+unresolvable — six are class names (`SKILL.md` matches sixteen files) and
+twenty-six name nothing in the tree because they are examples. Spec 0001 section
+14 already holds that case: whether a path-shaped string in prose was a pointer
+or an example is a permanent UNKNOWN.
+
 **Three decisions worth stating, because none was forced by the ticket:**
 
 - *An address is only a pointer if it carries a file extension, and either a `/`

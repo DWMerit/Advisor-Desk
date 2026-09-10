@@ -29,7 +29,19 @@ from orbit_context.workspace import project_id_from_path
 # The bar ticket 04 sets for a real repository. Counted over ExternalRef rows,
 # which are one per address: "this address is named and nothing here matches it"
 # is one finding about the estate however many times the estate writes it.
-UNMATCHED_CEILING = 100
+# The share of *distinct addresses* named in prose that do not resolve. A share,
+# not a count: the count this replaced was calibrated when the repository was a
+# book corpus, and it breached the moment the repository also contained
+# documentation about a file-handling tool -- prose that names files for a living,
+# including files that do not exist here by definition. That breach said the
+# repository had grown, not that the detectors had degraded, which is not what a
+# guard is for.
+#
+# One in three. Stated as a rule rather than fitted to a reading: more than a
+# third of the addresses named across the estate's prose failing to resolve means
+# the detectors are reading things that are not pointers. The reading when this
+# was set was 98 of 341, 28.7%.
+UNMATCHED_SHARE_CEILING = 0.33
 
 
 class TestBoundaries(unittest.TestCase):
@@ -354,6 +366,9 @@ class TestOnARealRepository(unittest.TestCase):
         cls.root = support.REPO_ROOT.resolve()
         cls.unmatched = set()
         cls.resolved = 0
+        # Distinct addresses that resolved, so a share can be taken with the
+        # same unit on both sides.
+        cls.resolved_addresses: set[str] = set()
         # Kept beside each unmatched address: its detector and the line it was
         # written on, so the capture can be checked against the text rather than
         # only counted.
@@ -373,19 +388,35 @@ class TestOnARealRepository(unittest.TestCase):
                     continue
                 if found.resolved:
                     cls.resolved += 1
+                    cls.resolved_addresses.add(pointer.address)
                 elif found.sub_kind == pointers.NO_INDEXED_TARGET_MATCH:
                     cls.unmatched.add(pointer.address)
                     cls.written_on.append(
                         (pointer.address, pointer.subtype, lines[pointer.line - 1])
                     )
 
-    def test_unmatched_addresses_stay_in_the_tens(self):
-        self.assertLess(len(self.unmatched), UNMATCHED_CEILING, sorted(self.unmatched))
+    def test_most_addresses_named_in_prose_resolve(self):
+        """The drift guard, as a share rather than a count.
+
+        Counted over distinct addresses on both sides, because that is what the
+        graph holds -- one `ExternalRef` per address, however many edges enter
+        it. The count this replaced compared distinct unmatched addresses
+        against resolved *occurrences*, which is two different units either
+        side of one ratio, and it flattered the reading by roughly six times.
+        """
+        named = len(self.unmatched) + len(self.resolved_addresses)
+        share = len(self.unmatched) / named
+        self.assertLess(
+            share, UNMATCHED_SHARE_CEILING,
+            f"{len(self.unmatched)} of {named} addresses named in prose did not "
+            f"resolve ({share:.1%}); ceiling {UNMATCHED_SHARE_CEILING:.0%}. "
+            f"{sorted(self.unmatched)}")
 
     def test_most_pointers_resolve(self):
-        # The inverse of the failure the boundary rules exist to prevent: a
-        # report that is mostly the tool talking about itself.
-        self.assertGreater(self.resolved, len(self.unmatched))
+        # The catastrophe guard, and the reason the share above sits below it:
+        # the failure the boundary rules exist to prevent is a report that is
+        # mostly the tool talking about itself. Distinct addresses both sides.
+        self.assertGreater(len(self.resolved_addresses), len(self.unmatched))
 
     def test_no_capture_started_in_the_middle_of_a_token(self):
         """Every unmatched address begins at a real boundary in its own line.
