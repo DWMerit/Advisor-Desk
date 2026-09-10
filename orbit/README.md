@@ -515,7 +515,9 @@ evidence and the count carrying none:
   "generation_declared_without_producer_named": 0,
   "producer_named_no_indexed_target_match": 0,
   "files_hashed": 254,
-  "files_not_read": 0,
+  "files_not_read": 14,
+  "files_not_read_by_reason": {"non-regular-file": 14, "oversize": 0,
+                               "read_error": 0},
   "zero_byte_files_not_paired": 1
 }
 ```
@@ -640,6 +642,45 @@ Every candidate becomes a row, including ones that could not be read. The
 | `oversize` | Larger than 5 MiB. |
 | `read_error` | The filesystem refused the read. |
 | `not_a_file` | The path is not a regular file. |
+| `non-regular-file` | A symlink. Listed as a node, never read. |
+
+### A symlink is a node, never read
+
+GitLab Orbit's rule, adopted in their vocabulary rather than answered our own
+way. Their walk accepts an entry that is a file **or** a symlink and skips only
+what is neither (`crates/utils/src/walk.rs:37-41`); a symlink is then routed
+away from the reader rather than out of the walk (`:53-57`), where the default
+is `Decision::ListOnly` — "record the file as a node without loading its bytes"
+(`crates/utils/src/fs_stream.rs:22`). Its size is `symlink_metadata()`
+(`walk.rs:47`), the link's own. The reason is `FilterSkip::NonRegularFile`
+(`crates/code-graph/src/v2/config/filter.rs:51`), documented at
+`crates/orbit-observability/src/indexer/code.rs:152` as "a symlink — a node,
+never parsed".
+
+So, here:
+
+- The walk lists it, and does not descend into a link to a directory: that would
+  walk one tree twice and count one file as two.
+- **No bytes are loaded** — not for a first heading, not for a clause, not for a
+  hash. It follows that a link is in no byte-identical pair and on no ladder.
+- Its `size_bytes` is the link's own. On this repository
+  `_rule-workbench/<book>/full.md` is 32 bytes, not the 17,866 of the book it
+  names.
+- A link carrying a **vendor name** is still a candidate — a name is readable
+  without opening the file — and becomes a row carrying `non-regular-file`, the
+  way an oversize surface carries `oversize`.
+- **The corpus share counts only files that were read.** A node the walk listed
+  without loading cannot declare itself, so it must not count against the files
+  that did. Without that rule, listing this repository's fourteen `full.md`
+  links takes `_rule-workbench` from 42 of 45 declared to 42 of 59 — under the
+  75% share — and the three files that only the share recognises stop being
+  surfaces, with nothing in the output saying a symlink rule caused it. It
+  follows that a link is never recognised *by* a corpus either.
+
+Two names for one file still count as two nodes here. Folding them to one,
+labelled by the target (`crates/orbit-local/src/commands/setup.rs:265-271`), is
+a stronger statement than byte identity and belongs with the comparison, where
+two states can disagree about it.
 
 Every one of these also lands in `gl_context_coverage`, keyed to the snapshot,
 so `repo-map` can report what was reached and not read without re-walking the

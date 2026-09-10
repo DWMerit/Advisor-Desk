@@ -143,7 +143,14 @@ def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
         "name": detected.name,
         "surface_kind": detected.kind,
         "recognition": detected.recognition,
-        "content_sha256": _digest(repo.root / detected.relative_path),
+        # A node listed without its bytes has no digest of its own, and taking
+        # one would follow the link and hash the file it names -- filing one
+        # file's bytes under two paths and inventing a byte-identical pair the
+        # estate does not have.
+        "content_sha256": (
+            "" if detected.non_regular
+            else _digest(repo.root / detected.relative_path)
+        ),
         "size_bytes": detected.size_bytes,
         "frontmatter_bytes": detected.frontmatter_bytes,
         "body_bytes": detected.body_bytes,
@@ -345,7 +352,8 @@ def _produces_edges(edge: EdgeType, repo: Repository,
 
 
 def _rung_edges(edge: EdgeType, repo: Repository,
-                whole_file_surfaces: dict[str, int]) -> tuple[list[dict], list[str]]:
+                whole_file_surfaces: dict[str, int],
+                listed: set[str]) -> tuple[list[dict], list[str]]:
     """One edge per rung whose base rung is a surface in the same repository.
 
     The relation is read off two filenames, so both ends have to be surfaces
@@ -356,15 +364,24 @@ def _rung_edges(edge: EdgeType, repo: Repository,
     both ends, and inventing the missing one would put a file in the graph the
     repository does not hold. It is returned instead, so that a rung the estate
     wrote and this tool could not attach does not read as a rung never written.
+
+    ``listed`` is the paths this run recorded as nodes without reading them.
+    A vendor name reaches a symlink -- `.claude/agents/reviewer.mini.md` beside
+    `reviewer.md` is a row and a rung word -- and a link is neither end of a
+    ladder: the rung words say two files hold one book at two sizes, and a link
+    is one file wearing a second name. It is not a rung this tool could not
+    attach either, so it is left out of both figures rather than counted as one.
     """
     rows: list[dict] = []
     without_a_base: list[str] = []
     for path in sorted(whole_file_surfaces):
+        if path in listed:
+            continue
         named = surfaces.rung_of(path)
         if named is None:
             continue
         base_path, rung = named
-        base_id = whole_file_surfaces.get(base_path)
+        base_id = None if base_path in listed else whole_file_surfaces.get(base_path)
         if base_id is None:
             without_a_base.append(path)
             continue
@@ -627,7 +644,12 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
             _count(result, note.relative_path, note.reason, note.detail, note.errored)
 
     whole_file = _whole_file_surfaces(rows)
-    rung_rows, rungs_without_a_base = _rung_edges(rung_of, repo, whole_file)
+    # The paths this run listed without opening. A link is a node like any
+    # other and is pointed at like any other; what it is never is one end of a
+    # relation read out of two files' contents or two files' rung words.
+    listed = {row["path"] for row in rows.values()
+              if row["reason"] == surfaces.REASON_NON_REGULAR_FILE}
+    rung_rows, rungs_without_a_base = _rung_edges(rung_of, repo, whole_file, listed)
     edge_rows.extend(rung_rows)
     external_rows: dict[int, dict] = {}
     counts: dict[str, int] = {sub_kind: 0 for sub_kind in pointer_module.SUB_KINDS}

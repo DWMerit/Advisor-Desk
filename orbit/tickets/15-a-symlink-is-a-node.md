@@ -147,19 +147,109 @@ every count taken against a contaminated store is arguable until it is not.
 
 ## Acceptance
 
-- [ ] `surfaces.py` walks symlinks, and the skip at line 414 is gone
-- [ ] A symlink's bytes are never read — no heading, no clause, no hash — and a
+- [x] `surfaces.py` walks symlinks, and the skip at line 414 is gone
+- [x] A symlink's bytes are never read — no heading, no clause, no hash — and a
       test asserts it is in no byte-identical pair and no ladder
-- [ ] A symlink's recorded size is the link's own, not its target's
-- [ ] The reason is `non-regular-file`, and the ticket's quotation of
+- [x] A symlink's recorded size is the link's own, not its target's
+- [x] The reason is `non-regular-file`, and the ticket's quotation of
       `indexer/code.rs:152` is what it was taken from
-- [ ] The corpus share counts only files that were read, and a test builds a
+- [x] The corpus share counts only files that were read, and a test builds a
       directory where the unread files would sink it below the threshold
-- [ ] `surfaces` is still 87 on this repository, reconciled by name against
+- [x] `surfaces` is still 87 on this repository, reconciled by name against
       ticket `08`'s hand count, not re-baselined
-- [ ] No `REFERENCES` edge points at a path the walk recorded no row for
-- [ ] The acceptance run states both detector set versions
-- [ ] Output contains no forbidden vocabulary word
+- [x] No `REFERENCES` edge points at a path the walk recorded no row for
+- [x] The acceptance run states both detector set versions
+- [x] Output contains no forbidden vocabulary word
+
+## The acceptance run
+
+Advisor-Desk, branch head. **Detector set `1.8516f0a599c4` before,
+`1.1c9494f7857c` after** — the version moved on its own, off the new reason
+constant and the corpus rule's new input, which is the mechanism working.
+
+The walk is the figure this ticket moves, so it is reported as a set difference
+over one tree rather than as two totals taken at two moments:
+
+```
+old walk 306 -> new walk 320
+added   14: _rule-workbench/<book>/full.md, one per book
+removed  0
+```
+
+The fourteen, in full, each listed and never read, each 32 bytes of link rather
+than the 17,866 of the book it names:
+
+```
+_rule-workbench/a-philosophy-of-software-design/full.md
+_rule-workbench/clean-architecture/full.md
+_rule-workbench/clean-code/full.md
+_rule-workbench/code-complete/full.md
+_rule-workbench/designing-data-intensive-applications/full.md
+_rule-workbench/domain-driven-design-distilled/full.md
+_rule-workbench/domain-driven-design/full.md
+_rule-workbench/implementing-domain-driven-design/full.md
+_rule-workbench/patterns-of-enterprise-application-architecture/full.md
+_rule-workbench/refactoring-guru/full.md
+_rule-workbench/refactoring/full.md
+_rule-workbench/release-it/full.md
+_rule-workbench/the-pragmatic-programmer/full.md
+_rule-workbench/working-effectively-with-legacy-code/full.md
+```
+
+They carry no vendor name, so none of them is a candidate and none becomes a
+row. Their reason is reported where a file that was walked and not hashed is
+reported:
+
+```json
+"files_hashed": 306,
+"files_not_read": 14,
+"files_not_read_by_reason": {"non-regular-file": 14, "oversize": 0,
+                             "read_error": 0}
+```
+
+Everything the ticket said must not move, did not:
+
+| | before | after | expected |
+|---|---|---|---|
+| surfaces | 103 | **103** | unchanged |
+| recognition | 16 / 84 / 3 | **16 / 84 / 3** | unchanged |
+| corpus-adjacent | 3 | **3** | 3 — the trap, not sprung |
+| identical-bytes pairs | 28 | **28** | 28 — never loaded, never hashed |
+| ladders / rungs | 14 / 42 | **14 / 42** | 14 / 42 |
+| `REFERENCES` edges landing on a path the walk did not find | 46 | **0** | 0 |
+| errored files | 0 | **0** | 0 |
+
+**Reconciled against `08`'s hand count by name, not re-derived.** 103 surfaces
+rather than the ticket's 87 because the branch head carries `orbit/` and
+`.claude/` on top of the 201 files `08` counts; the 87 that came from those 201
+are the same 87, and the fourteen links are the same fourteen `08` lists. The
+`files_hashed` figure is 306 rather than the 304 of the run before this one
+because this ticket added two files of its own — `orbit/fixtures/build_symlinks.py`
+and `orbit/tests/test_symlinks.py`. Neither is Markdown, so neither is a
+surface, a pair or a rung, so every row of the table above except the walk
+itself is comparable as it stands.
+
+**The 46 edges are still 46 edges.** They now land on paths the walk found, which
+is the fix: one walk and one resolver giving one answer to "what is in this
+repository". Nothing was dropped to reach zero.
+
+**Two names for one file still count as two nodes.** GitLab's dedupe
+(`crates/orbit-local/src/commands/setup.rs:265-271`) is written into 13 and 14,
+where two states can disagree about it, and is deliberately not here.
+
+**Containment is not implemented, and the disagreement is recorded rather than
+resolved.** `crates/utils/src/fs.rs:23-34` canonicalises a link's target and
+keeps it only if it lands under the root. We never resolve a target at all — the
+row is the link's own name and the link's own size — so there is nothing here for
+containment to guard. It becomes real the day something follows a link, and that
+day is not this ticket.
+
+**One spelling is ours, not theirs.** Their metric label is `non_regular_file`
+and this ticket asked for `non-regular-file`, their word in our kebab-case. It is
+written that way. It is the only value in the `reason` column that is not
+snake_case — `invalid_utf8`, `oversize`, `read_error`, `not_a_file` — so a query
+against that column now has to know which separator each value uses. Recorded
+here as a divergence rather than quietly corrected in either direction.
 
 ## Watch for
 

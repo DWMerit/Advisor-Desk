@@ -227,6 +227,14 @@ REASON_INVALID_UTF8 = "invalid_utf8"
 REASON_OVERSIZE = "oversize"
 REASON_READ_ERROR = "read_error"
 REASON_NOT_A_FILE = "not_a_file"
+# GitLab Orbit's word for a symlink, in our kebab-case. Theirs is
+# `FilterSkip::NonRegularFile` (crates/code-graph/src/v2/config/filter.rs:51),
+# surfaced as the metric label documented at
+# crates/orbit-observability/src/indexer/code.rs:152 -- "non_regular_file (a
+# symlink -- a node, never parsed)" -- in the same list as `oversize`, `binary`
+# and `not_utf8`, which is this family. Adopted rather than invented: we had
+# written our own answer to symlinks without checking whether they had one.
+REASON_NON_REGULAR_FILE = "non-regular-file"
 REASON_OUTSIDE_REPOSITORY = "outside_indexed_repository"
 REASON_INVALID_JSON = "invalid_json"
 REASON_FRONTMATTER_DECLARATION_ABSENT = "frontmatter_declaration_absent"
@@ -263,6 +271,11 @@ class WalkedFile:
 
     relative_path: str
     absolute_path: Path
+    # A symlink: a node this walk lists and never reads. Carried from the walk
+    # rather than re-tested downstream, so that "is this a file we opened" has
+    # one answer per entry and the corpus rule, the reader and the hasher
+    # cannot come apart on it.
+    non_regular: bool = False
 
 
 @dataclass(frozen=True)
@@ -273,6 +286,9 @@ class Candidate:
     absolute_path: Path
     kind: str
     recognition: str = RECOGNITION_VENDOR_NAME
+    # The walk's answer, carried through: a name is enough to make a link a
+    # candidate, and never enough to make it readable.
+    non_regular: bool = False
 
 
 @dataclass(frozen=True)
@@ -289,6 +305,9 @@ class Detected:
     reason: str = INDEXED
     detail: str = ""
     errored: bool = False
+    # A node listed without its bytes. Not a column: it is what tells the row
+    # writer there is no digest to take, and taking one would follow the link.
+    non_regular: bool = False
     name: str | None = None
     frontmatter_bytes: int | None = None
     body_bytes: int | None = None
@@ -400,6 +419,14 @@ def walk_files(repo_root: Path, nested_repos: list[Path] | None = None) -> list[
     repository", and the pruning rules would have to agree by hand.
 
     Files belonging to a nested repository are left to that repository.
+
+    **A symlink is a node, listed and never read**, which is GitLab Orbit's rule
+    and not ours: their walk accepts an entry that is a file *or* a symlink and
+    skips only what is neither (`crates/utils/src/walk.rs:37-41`), and it is
+    routed away from the reader rather than out of the walk (`:53-57`). Tested
+    with ``is_symlink`` before ``is_dir``, so a link to a directory is one node
+    and not a second pass over the tree it names -- descending would walk one
+    file twice under two paths and count it as two.
     """
     nested = {p.resolve() for p in (nested_repos or [])}
     found: list[WalkedFile] = []
@@ -412,6 +439,7 @@ def walk_files(repo_root: Path, nested_repos: list[Path] | None = None) -> list[
             continue
         for entry in entries:
             if entry.is_symlink():
+                found.append(_listed(entry, repo_root))
                 continue
             if entry.is_dir():
                 if entry.name in PRUNED_DIRECTORIES:
@@ -420,8 +448,28 @@ def walk_files(repo_root: Path, nested_repos: list[Path] | None = None) -> list[
                     continue
                 stack.append(entry)
                 continue
+            if not entry.is_file():
+                continue
             found.append(WalkedFile(entry.relative_to(repo_root).as_posix(), entry))
     return sorted(found, key=lambda walked: walked.relative_path)
+
+
+def _listed(entry: Path, root: Path) -> WalkedFile:
+    """One node the walk lists without opening."""
+    return WalkedFile(entry.relative_to(root).as_posix(), entry, non_regular=True)
+
+
+def link_size(path: Path) -> int:
+    """A link's own size, from ``lstat`` -- never its target's.
+
+    GitLab takes the same figure the same way (`crates/utils/src/walk.rs:47`).
+    On this estate ``full.md`` is 32 bytes, not the 17,866 of the book it names,
+    and reporting the target's would put one book's bytes in the total twice.
+    """
+    try:
+        return path.lstat().st_size
+    except OSError:
+        return 0
 
 
 def first_heading(text: str) -> str:
@@ -481,11 +529,16 @@ def _scan_head(path: Path) -> str:
 
 
 def declared_paths(walked_files: list[WalkedFile]) -> set[str]:
-    """The walked files whose own first heading declares them governance."""
+    """The walked files whose own first heading declares them governance.
+
+    Only files that were read. A node the walk listed without loading has no
+    first heading to offer, and opening one here would read through the link.
+    """
     return {
         walked.relative_path
         for walked in walked_files
-        if walked.relative_path.endswith(CORPUS_SUFFIXES)
+        if not walked.non_regular
+        and walked.relative_path.endswith(CORPUS_SUFFIXES)
         and declares_directive(_scan_head(walked.absolute_path))
     }
 
@@ -537,16 +590,33 @@ def candidates(walked_files: list[WalkedFile]) -> list[Candidate]:
     First match wins, so a file carrying both a vendor name and a directive
     heading is recorded under the vendor name. Both say the same thing about
     what the file is; the vendor name is the narrower claim and the older one.
+
+    Only the first rule reaches a node the walk listed without reading: a name
+    is readable without opening the file, and the other two are not. Such a
+    candidate becomes a row carrying the reason it was not read, the way an
+    oversize surface does.
     """
     vendor = {
         walked.relative_path: kind
         for walked in walked_files
         if (kind := classify(walked.relative_path)) is not None
     }
+    # **The corpus share is a share of files that were read.** A node the walk
+    # listed without loading cannot declare itself, so it must not count against
+    # the files that did -- a file that was never opened is not evidence about
+    # the directory either way. Measured before it was hit: listing this
+    # repository's fourteen `full.md` links into `_rule-workbench` takes it from
+    # 42 of 45 declared to 42 of 59, under the share, and the corpus dissolves
+    # with nothing in the output saying a symlink rule caused it.
+    #
+    # It follows that a link is never recognised *by* a corpus either. The
+    # corpus rule is this module's one inference and it reads a directory to
+    # make it; a file outside what that reading covers is outside its result.
     corpus_files = {
         walked.relative_path
         for walked in walked_files
-        if walked.relative_path.endswith(CORPUS_SUFFIXES)
+        if not walked.non_regular
+        and walked.relative_path.endswith(CORPUS_SUFFIXES)
     }
     declared = declared_paths(walked_files) - set(vendor)
     # Only files that declared themselves count toward a directory's share. A
@@ -566,7 +636,8 @@ def candidates(walked_files: list[WalkedFile]) -> list[Candidate]:
             recognition, kind = RECOGNITION_CORPUS_ADJACENT, INSTRUCTION_SURFACE
         else:
             continue
-        found.append(Candidate(path, walked.absolute_path, kind, recognition))
+        found.append(Candidate(path, walked.absolute_path, kind, recognition,
+                               non_regular=walked.non_regular))
     return found
 
 
@@ -580,8 +651,17 @@ def read_candidate(candidate: Candidate) -> Reading:
 
     A candidate that cannot be read still becomes a row: coverage is a property
     of the record, not a footnote.
+
+    A symlink is settled here rather than in the walk, which is GitLab's own
+    arrangement and their reason for it: routed to the filter "so the filter
+    stays the single decision point" (`crates/utils/src/fs_stream.rs:114-119`),
+    where their default is ``Decision::ListOnly`` -- "record the file as a node
+    without loading its bytes" (`fs_stream.rs:22`).
     """
     path = candidate.absolute_path
+    if candidate.non_regular:
+        return Reading(link_size(path), REASON_NON_REGULAR_FILE, "", errored=False)
+
     try:
         stat = path.stat()
     except OSError as error:
@@ -633,7 +713,8 @@ def expand(repo_root: Path, candidate: Candidate,
                              reading.detail, reading.errored)]
         return [Detected(candidate.relative_path, candidate.kind,
                          reading.size_bytes, candidate.recognition,
-                         reading.reason, reading.detail, reading.errored)], []
+                         reading.reason, reading.detail, reading.errored,
+                         non_regular=candidate.non_regular)], []
 
     text = reading.text or ""
     frontmatter = split_frontmatter(text)
@@ -728,9 +809,19 @@ def _expand_container(repo_root: Path, candidate: Candidate,
 
 def _hook_target_row(repo_root: Path, relative_path: str,
                      recognition: str) -> Detected | None:
-    """Mark the file a hook command resolves to as a hook target."""
+    """Mark the file a hook command resolves to as a hook target.
+
+    A command can resolve to a link like anything else, and the rule does not
+    change for arriving here rather than through the walk: the size is the
+    link's own, and its bytes are not read.
+    """
+    path = repo_root / relative_path
+    if path.is_symlink():
+        return Detected(relative_path=relative_path, kind=HOOK_TARGET,
+                        size_bytes=link_size(path), recognition=recognition,
+                        reason=REASON_NON_REGULAR_FILE, non_regular=True)
     try:
-        size = (repo_root / relative_path).stat().st_size
+        size = path.stat().st_size
     except OSError:
         return None
     return Detected(relative_path=relative_path, kind=HOOK_TARGET,
@@ -757,11 +848,14 @@ def walk_outside_repos(root: Path, repo_roots: list[Path]) -> list[Candidate]:
             continue
         for entry in entries:
             if entry.is_symlink():
+                walked.append(_listed(entry, root))
                 continue
             if entry.is_dir():
                 if entry.name in PRUNED_DIRECTORIES:
                     continue
                 stack.append(entry)
+                continue
+            if not entry.is_file():
                 continue
             walked.append(WalkedFile(entry.relative_to(root).as_posix(), entry))
     # The same recogniser the indexed repositories go through. Two would be two

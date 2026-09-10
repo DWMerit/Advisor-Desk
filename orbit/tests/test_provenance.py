@@ -401,8 +401,34 @@ class TestThisRepository(unittest.TestCase):
             + self.summary["pairs_without_provenance"],
         )
 
-    def test_nothing_was_left_unread(self):
-        self.assertEqual(self.summary["files_not_read"], 0)
+    def test_the_only_files_left_unread_are_the_links(self):
+        """A symlink is listed and never read; nothing else here went unread.
+
+        Ticket 15's rule on the estate it was found on. The two reasons that
+        would mean this tool *could not* read a file are still zero, and the
+        fourteen `_rule-workbench/<book>/full.md` links are the whole of the
+        difference. Stated as a floor for the same reason the pair count above
+        is: the estate is allowed to grow.
+        """
+        by_reason = self.summary["files_not_read_by_reason"]
+        self.assertEqual(by_reason[surfaces.REASON_OVERSIZE], 0)
+        self.assertEqual(by_reason[surfaces.REASON_READ_ERROR], 0)
+        self.assertGreaterEqual(by_reason[surfaces.REASON_NON_REGULAR_FILE], 14)
+        self.assertEqual(
+            by_reason[surfaces.REASON_NON_REGULAR_FILE],
+            self.summary["files_not_read"],
+        )
+
+    def test_no_link_is_hashed_here_either(self):
+        """The rule that keeps the 28 pairs at 28: a link is never opened, so
+        it can never be one end of a byte-identical pair."""
+        linked = {
+            walked.relative_path
+            for walked in surfaces.walk_files(self.root)
+            if walked.non_regular
+        }
+        self.assertGreaterEqual(len(linked), 14)
+        self.assertEqual(linked & set(self.scan.contents), set())
 
 
 if __name__ == "__main__":

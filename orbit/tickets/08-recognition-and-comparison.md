@@ -5,7 +5,7 @@ Spec: `orbit/specs/0002-recognition-and-the-three-state-comparison.md`
 Seven tickets. Work top to bottom; each is blocked by the one before it, because
 each measures something the previous one made measurable.
 
-**Four are done. The frontier is 15.**
+**Five are done. The frontier is 13.**
 
 | # | Ticket | Blocked by | State |
 |---|---|---|---|
@@ -13,8 +13,8 @@ each measures something the previous one made measurable.
 | 10 | A rule file is a surface | 09 | done |
 | 11 | The ladder is queryable | 10 | done |
 | 12 | Workbench to published carries a direction where evidence allows | 11 | done |
-| 15 | A symlink is a node, never read | — | **frontier** |
-| 13 | Two states compare | 12, 15 | |
+| 15 | A symlink is a node, never read | — | done |
+| 13 | Two states compare | 12, 15 | **frontier** |
 | 14 | Three states, and ticket 07 re-scoped | 13 | |
 
 **15 is out of numerical order on purpose.** It was written after 12 and belongs
@@ -33,13 +33,14 @@ longer declares and holds a prior index of another repository. Every count taken
 against it is arguable until neither is true. Nothing else in this batch is worth
 measuring first.
 
-**Second prefactoring, found at ticket 12: ticket 15.** Our walk refuses
-symlinks; GitLab Orbit's lists them as nodes it never reads, with a reason of its
-own (`non_regular_file`). That is a divergence from the tool this project exists
-to emulate faithfully, it is invisible in every count taken so far, and it is
-carried by all three comparison states — so a three-state comparison run on the
-current walk measures our divergence in each of them and calls the result a
-finding about governance. Same argument as 09, found later.
+**Second prefactoring, found at ticket 12: ticket 15, now done.** Our walk
+refused symlinks; GitLab Orbit's lists them as nodes it never reads, with a
+reason of its own (`non_regular_file`). That is a divergence from the tool this
+project exists to emulate faithfully, it was invisible in every count taken
+before it, and it is carried by all three comparison states — so a three-state
+comparison run on the old walk would have measured our divergence in each of
+them and called the result a finding about governance. Same argument as 09,
+found later.
 
 ## What this batch is
 
@@ -91,9 +92,10 @@ routes to one figure is what makes it a reconciliation rather than a count.
 Byte-identical pairs found by phase 1: **28**, with provenance: **0**.
 Ticket 12 reached the same 28 a second way — 14 books at two rungs each, `mini`
 and `nano`, every one crossing from `_rule-workbench/` to a published file, with
-the third rung absent because `full.md` is a symlink the walk never enters. All
-28 carry an explicit `UNKNOWN: no-producer-named-at-either-end`: nothing in this
-corpus declares the relationship anywhere a tool can read it.
+the third rung absent because `full.md` is a symlink — ticket 15 lists it as a
+node and never reads it, so it is in no pair. All 28 carry an explicit
+`UNKNOWN: no-producer-named-at-either-end`: nothing in this corpus declares the
+relationship anywhere a tool can read it.
 One ladder, for reference: `refactoring.md` 17,866 / `.mini.md` 5,167 /
 `.nano.md` 1,986 bytes — the three ticket 11 printed back, byte for byte.
 

@@ -49,9 +49,18 @@ from .jsonloc import JsonLocationError, Node, parse as parse_json
 # hashed neither for pairing nor for evidence, and is counted instead.
 from .surfaces import (
     MAX_SURFACE_BYTES as MAX_FILE_BYTES,
+    REASON_NON_REGULAR_FILE,
     REASON_OVERSIZE,
     REASON_READ_ERROR,
 )
+
+# Why a walked file was not hashed. Reported split by reason rather than as one
+# number, by the same rule the direction reasons are: "a node this walk lists
+# and never opens" and "a file too large to read" are different statements about
+# the estate, and a single count of files not read says neither. Every reason is
+# present at zero, so a reason that found nothing reads as a reason that found
+# nothing.
+NOT_READ_REASONS = (REASON_NON_REGULAR_FILE, REASON_OVERSIZE, REASON_READ_ERROR)
 
 IDENTICAL_BYTES_EDGE = "IDENTICAL_BYTES"
 PRODUCES_EDGE = "PRODUCES"
@@ -241,6 +250,13 @@ def read_tree(repo_root: Path, files) -> Scan:
     scan = Scan()
     for walked in files:
         relative = walked.relative_path
+        # A node the walk listed is never opened, so it is never hashed. Reading
+        # through the link would file one book's bytes under two names and
+        # invent a byte-identical pair the estate does not have -- and ticket 12
+        # has just finished establishing what this estate's 28 pairs are.
+        if walked.non_regular:
+            scan.not_read.append((relative, REASON_NON_REGULAR_FILE))
+            continue
         try:
             size = walked.absolute_path.stat().st_size
         except OSError:
@@ -660,6 +676,9 @@ def summary(scan: Scan, matched: list[Pair],
     different reading of them than the rows carry.
     """
     ordered = directions(matched, productions)
+    not_read_by_reason = {reason: 0 for reason in NOT_READ_REASONS}
+    for _, reason in scan.not_read:
+        not_read_by_reason[reason] = not_read_by_reason.get(reason, 0) + 1
     by_reason = {reason: 0 for reason in DIRECTION_UNKNOWN_REASONS}
     by_direction_evidence = {rung: 0 for rung in EVIDENCE_LADDER}
     with_a_direction = 0
@@ -698,6 +717,7 @@ def summary(scan: Scan, matched: list[Pair],
         "producer_named_no_indexed_target_match": unresolved,
         "files_hashed": len(scan.contents),
         "files_not_read": len(scan.not_read),
+        "files_not_read_by_reason": not_read_by_reason,
         "zero_byte_files_not_paired": len(scan.zero_byte),
     }
 
