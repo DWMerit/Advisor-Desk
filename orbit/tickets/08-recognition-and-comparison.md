@@ -99,6 +99,38 @@ relationship anywhere a tool can read it.
 One ladder, for reference: `refactoring.md` 17,866 / `.mini.md` 5,167 /
 `.nano.md` 1,986 bytes — the three ticket 11 printed back, byte for byte.
 
+### Added at C1, not present at C0
+
+The branch installed a vendor skill chain on 2026-09-10. It is governance, it is
+tracked, and it is not on `main`, so any count taken at HEAD reconciles against
+this block as well as the one above.
+
+| group | count |
+|---|---|
+| `.claude/skills/<name>/SKILL.md` | 16 |
+| `.claude/skills/<name>/agents/*.yaml` | 16 |
+| supporting `.md` beside a `SKILL.md` | 16 |
+| **`.claude/` total** | **48** |
+
+16 skill directories: ask-matt, code-review, codebase-design, domain-modeling,
+grill-me, grill-with-docs, grilling, implement, prototype, research,
+setup-matt-pocock-skills, tdd, to-spec, to-tickets, triage, wayfinder.
+
+Reached a second way: surfaces at HEAD are **103** against 87 before the chain
+landed, and 103 − 87 = 16, one `skill-package` per directory. The 16 yaml files
+and the 16 supporting `.md` files are **not** surfaces — a supporting file inside
+a skill package is reachable only through whatever its `SKILL.md` points at, and
+no detector claims it as a governance object in its own right. That is a
+statement about these detectors, not about those files.
+
+Non-`orbit/` files: **201 at C0, 250 at HEAD** — the 48 above plus `.gitignore`.
+
+**This block is why ticket 13's zero is written the way it is.** *"C1 added no
+governance"* held when it was written and stopped holding four hours later.
+Ticket 13 recorded the move rather than restating the expectation, which is the
+behaviour wanted: a pinned figure is a tripwire, and a tripwire that fires has
+done its job.
+
 A count that cannot be tied back to these named groups is not a result.
 
 ## Rules for every ticket
