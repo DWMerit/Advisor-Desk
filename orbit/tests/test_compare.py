@@ -63,6 +63,26 @@ def _compare(repo: Path, before: str, after: str, db: Path) -> compare.Compariso
     return compare.compare(repo, before, after, db_path=db)
 
 
+# The two-state reading of one row, named here rather than on `Row`. A row
+# carries every state's own figure and every delta against the first, which is
+# what a three-state table needs; most of the comparisons in this file have
+# exactly two states, and `before`, `after` and `delta` are what those two are
+# called in the ticket. Naming them in the tests keeps the assertions readable
+# without a production accessor whose only callers are here -- and without
+# `delta` having to mean "the last one, minus the first" wherever a comparison
+# holds more than two.
+def first(row: compare.Row) -> int:
+    return row.values[0]
+
+
+def second(row: compare.Row) -> int:
+    return row.values[1]
+
+
+def moved_by(row: compare.Row) -> int:
+    return row.deltas[0]
+
+
 class StatesTestCase(unittest.TestCase):
     """Seam A: build the repository at three commits and difference them."""
 
@@ -82,7 +102,7 @@ class StatesTestCase(unittest.TestCase):
 class TestASessionThatAddedATool(StatesTestCase):
     def test_the_files_it_added_are_counted(self):
         self.assertEqual(
-            self.tool.after.files_walked - self.tool.before.files_walked,
+            self.tool.states[1].files_walked - self.tool.baseline.files_walked,
             TOOL_FILES,
         )
 
@@ -91,20 +111,20 @@ class TestASessionThatAddedATool(StatesTestCase):
         # session added eight files, four of them Markdown, and the second
         # figure is the one that reads as governance if nothing separates them.
         markdown = self.tool.suffixes()[".md"]
-        self.assertEqual(markdown.delta, TOOL_MARKDOWN)
-        self.assertNotEqual(markdown.delta, TOOL_FILES)
+        self.assertEqual(moved_by(markdown), TOOL_MARKDOWN)
+        self.assertNotEqual(moved_by(markdown), TOOL_FILES)
 
     def test_nothing_outside_the_directory_it_added_moved(self):
         for name, row in self.tool.directories().items():
             expected = TOOL_FILES if name == "tool" else 0
-            self.assertEqual(row.delta, expected, name)
+            self.assertEqual(moved_by(row), expected, name)
 
     def test_the_files_outside_what_moved_are_totalled(self):
         # The row the ticket asks for as "non-orbit files: 201, 201, 0". Every
         # directory but the one that grew is at delta 0, so the total is the
         # whole of the first state -- and it is totalled over every directory,
         # listed or not, so the listing's cap cannot hide a file from it.
-        outside = self.tool.before.files_walked
+        outside = self.tool.baseline.files_walked
         self.assertRegex(
             compare.render(self.tool),
             rf"every directory that did not move\s+{outside}\s+{outside}\s+0",
@@ -114,9 +134,9 @@ class TestASessionThatAddedATool(StatesTestCase):
         # The row this ticket turns on. The session built a tool and left the
         # rule corpus alone; a comparison reporting governance here is reporting
         # rules the session did not write.
-        self.assertEqual(self.tool.surfaces().delta, 0)
+        self.assertEqual(moved_by(self.tool.surfaces()), 0)
         self.assertEqual(
-            self.tool.before.surface_rows, self.tool.after.surface_rows
+            self.tool.baseline.surface_rows, self.tool.states[1].surface_rows
         )
 
     def test_both_absolute_figures_sit_beside_every_delta(self):
@@ -124,19 +144,19 @@ class TestASessionThatAddedATool(StatesTestCase):
         # first state was miscounted by forty", and the second is the failure
         # mode this project has already had twice.
         for row in self.tool.rows():
-            self.assertEqual(row.delta, row.after - row.before, row.name)
-            self.assertIn(str(row.before), compare.render(self.tool))
-            self.assertIn(str(row.after), compare.render(self.tool))
+            self.assertEqual(moved_by(row), second(row) - first(row), row.name)
+            self.assertIn(str(first(row)), compare.render(self.tool))
+            self.assertIn(str(second(row)), compare.render(self.tool))
 
 
 class TestASessionThatGrewGovernance(StatesTestCase):
     def test_governance_added_is_reported_where_it_was_added(self):
         # The zero above is a measurement, not a property of the comparison.
-        self.assertEqual(self.governance.surfaces().delta, GOVERNANCE_ADDED)
+        self.assertEqual(moved_by(self.governance.surfaces()), GOVERNANCE_ADDED)
 
     def test_a_second_name_for_one_file_adds_no_surface(self):
         link, target = GOVERNANCE_LINK
-        labels = self.governance.after.surface_labels
+        labels = self.governance.states[1].surface_labels
         self.assertIn(target, labels)
         self.assertNotIn(link, labels)
 
@@ -145,18 +165,18 @@ class TestTwoNamesForOneFile(StatesTestCase):
     def test_a_link_is_folded_into_the_file_it_names(self):
         for book in BOOKS:
             self.assertNotIn(
-                f"_rule-workbench/{book}/full.md", self.tool.before.surface_labels
+                f"_rule-workbench/{book}/full.md", self.tool.baseline.surface_labels
             )
             self.assertIn(
-                f"{book}/{book}.md", self.tool.before.surface_labels
+                f"{book}/{book}.md", self.tool.baseline.surface_labels
             )
 
     def test_the_number_folded_is_reported_per_state(self):
         # Never a total. A fold in one state and not the other is exactly what
         # moves a zero, and one summed figure would hide which state it was.
-        self.assertEqual(self.tool.before.surfaces_folded, len(BOOKS))
-        self.assertEqual(self.tool.after.surfaces_folded, len(BOOKS))
-        self.assertEqual(self.governance.after.surfaces_folded, len(BOOKS) + 1)
+        self.assertEqual(self.tool.baseline.surfaces_folded, len(BOOKS))
+        self.assertEqual(self.tool.states[1].surfaces_folded, len(BOOKS))
+        self.assertEqual(self.governance.states[1].surfaces_folded, len(BOOKS) + 1)
 
     def test_the_fold_is_reported_beside_the_count_and_not_inside_it(self):
         text = compare.render(self.governance)
@@ -172,13 +192,13 @@ class TestRowsStandingAtOnePath(StatesTestCase):
         # would take these three down to one and report a file folded into
         # itself -- the dedupe quietly changing a count, which is the failure
         # mode this whole batch exists to catch.
-        state = self.tool.before
+        state = self.tool.baseline
         self.assertEqual(state.surface_rows - state.surface_files,
                          SETTINGS_ROWS - 1)
         self.assertIn(SETTINGS_PATH, state.surface_labels)
 
     def test_only_a_link_is_counted_as_folded(self):
-        for state in (self.tool.before, self.tool.after):
+        for state in (self.tool.baseline, self.tool.states[1]):
             self.assertEqual(state.surfaces_folded, len(BOOKS))
             for fold in state.folds:
                 self.assertNotEqual(fold.name, fold.counted_as)
@@ -189,7 +209,7 @@ class TestByteIdentityIsNeverCountedAlone(StatesTestCase):
         text = compare.render(self.tool)
         self.assertIn("carrying provenance evidence", text)
         self.assertIn("carrying no provenance evidence", text)
-        counts = self.tool.before.pair_counts
+        counts = self.tool.baseline.pair_counts
         self.assertEqual(counts.total,
                          counts.with_provenance + counts.without_provenance)
 
@@ -197,13 +217,13 @@ class TestByteIdentityIsNeverCountedAlone(StatesTestCase):
 class TestTheStatesAreComparable(StatesTestCase):
     def test_both_states_carry_the_same_detector_set(self):
         self.assertEqual(
-            self.tool.before.detector_set_version,
-            self.tool.after.detector_set_version,
+            self.tool.baseline.detector_set_version,
+            self.tool.states[1].detector_set_version,
         )
         self.assertTrue(self.tool.comparable)
 
     def test_the_output_states_the_detector_set(self):
-        self.assertIn(self.tool.before.detector_set_version,
+        self.assertIn(self.tool.baseline.detector_set_version,
                       compare.render(self.tool))
 
     def test_states_read_by_different_detector_sets_are_not_comparable(self):
@@ -212,9 +232,9 @@ class TestTheStatesAreComparable(StatesTestCase):
         # production method whose only caller is a test is a worse way to say so.
         moved = compare.Comparison(
             states=(
-                self.tool.before,
+                self.tool.baseline,
                 dataclasses.replace(
-                    self.tool.after, detector_set_version="1.000000000000"
+                    self.tool.states[1], detector_set_version="1.000000000000"
                 ),
             ),
             database_path=str(self.db),
@@ -236,7 +256,7 @@ class TestTheComparisonLeavesTheRepositoryAlone(StatesTestCase):
             ["git", "rev-parse", "HEAD"], cwd=self.repo,
             capture_output=True, text=True, check=True,
         )
-        self.assertEqual(head.stdout.strip(), self.governance.after.commit_sha)
+        self.assertEqual(head.stdout.strip(), self.governance.states[1].commit_sha)
 
     def test_no_worktree_is_left_behind(self):
         listed = subprocess.run(
@@ -273,8 +293,8 @@ class TestTheOutput(StatesTestCase):
 
     def test_it_says_what_was_indexed_for_each_state(self):
         text = compare.render(self.tool)
-        self.assertIn(self.tool.before.commit_sha[:12], text)
-        self.assertIn(self.tool.after.commit_sha[:12], text)
+        self.assertIn(self.tool.baseline.commit_sha[:12], text)
+        self.assertIn(self.tool.states[1].commit_sha[:12], text)
 
 
 class ThreeStatesTestCase(unittest.TestCase):
@@ -354,9 +374,11 @@ class TestThreeStates(ThreeStatesTestCase):
 class TestWhetherAStateRewroteItsBase(ThreeStatesTestCase):
     """The question asked of the rows, and answered either way.
 
-    Fourteen links weighing 32 bytes each, or fourteen files weighing what the
-    books weigh. After the fold both read as fourteen names counted once, so
-    the answer has to come from the link count and what the links weigh.
+    A link weighing the length of the name it holds, or a file weighing what
+    the book it copied weighs — three of them here and fourteen on the estate
+    this was found on. After the fold both shapes read as the same number of
+    names counted once, so the answer has to come from the link count and from
+    what the links weigh.
     """
 
     def _states(self, sibling: Path) -> compare.Comparison:
@@ -366,34 +388,39 @@ class TestWhetherAStateRewroteItsBase(ThreeStatesTestCase):
 
     def test_a_base_that_is_intact_carries_the_same_links(self):
         intact = self._states(self.sibling)
-        self.assertEqual(intact.before.link_rows, len(BOOKS))
-        self.assertEqual(intact.after.link_rows, len(BOOKS))
-        self.assertEqual(intact.before.link_bytes, intact.after.link_bytes)
+        self.assertEqual(intact.baseline.link_rows, len(BOOKS))
+        self.assertEqual(intact.states[1].link_rows, len(BOOKS))
+        self.assertEqual(intact.baseline.link_bytes, intact.states[1].link_bytes)
 
     def test_a_base_whose_links_were_resolved_says_so_in_the_rows(self):
         rewritten = self._states(self.rewritten)
-        self.assertEqual(rewritten.before.link_rows, len(BOOKS))
-        self.assertEqual(rewritten.after.link_rows, 0)
-        self.assertEqual(rewritten.after.link_bytes, 0)
+        self.assertEqual(rewritten.baseline.link_rows, len(BOOKS))
+        self.assertEqual(rewritten.states[1].link_rows, 0)
+        self.assertEqual(rewritten.states[1].link_bytes, 0)
         # And the fold that used to happen does not: the names are files now.
-        self.assertEqual(rewritten.after.surfaces_folded, 0)
-        self.assertGreater(rewritten.after.surface_bytes,
-                           rewritten.before.surface_bytes)
+        self.assertEqual(rewritten.states[1].surfaces_folded, 0)
+        self.assertGreater(rewritten.states[1].surface_bytes,
+                           rewritten.baseline.surface_bytes)
 
     def test_the_file_count_alone_does_not_tell_the_two_apart(self):
         # Which is why the link rows are printed. The walk reaches the same
         # names in the same number, and a comparison reading only that figure
         # would report the two repositories as the same one.
         rewritten = self._states(self.rewritten)
-        self.assertEqual(rewritten.before.files_walked,
-                         rewritten.after.files_walked)
-        self.assertEqual(rewritten.before.files_by_directory,
-                         rewritten.after.files_by_directory)
+        self.assertEqual(rewritten.baseline.files_walked,
+                         rewritten.states[1].files_walked)
+        self.assertEqual(rewritten.baseline.files_by_directory,
+                         rewritten.states[1].files_by_directory)
 
     def test_both_figures_are_printed_per_state(self):
+        # One measurement, one wording, in the counts and in the fold section
+        # both: a report naming the same figure two ways reads as two figures
+        # that happen to agree.
         text = compare.render(self._states(self.rewritten))
-        self.assertIn("names that resolve to another name", text)
-        self.assertRegex(text, r"names resolving to another name, \d+ bytes")
+        self.assertEqual(text.count(compare.LINK_ROWS), 3)
+        self.assertRegex(
+            text, rf"\d+ {compare.LINK_ROWS}, \d+ bytes, \d+ folded"
+        )
 
 
 class TestWhatTheWalkWeighed(ThreeStatesTestCase):

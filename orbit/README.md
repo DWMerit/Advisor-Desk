@@ -1011,7 +1011,7 @@ reports a session adding rules it did not write.
 
 The fold happens at compare time, off the `link_target` column, and **the number
 folded is reported per state** — beside the counts, never inside them. A fold
-that happens in one state and not the other is exactly what moves a zero, and
+that happens in one state and not in another is exactly what moves a zero, and
 one summed figure would hide which state it happened in.
 
 ### What the fold would otherwise hide
@@ -1053,7 +1053,7 @@ exactly where that would show.
 
 The sections that break the counts down — surfaces by kind, clauses by type,
 pointers by detector, edges by kind, the three non-resolutions — print their
-whole inventory in both states, at zero as well as at count, for the reason
+whole inventory in every state, at zero as well as at count, for the reason
 `repo-map` does. Only the two sections whose names come from the estate
 (suffixes, top-level directories) are capped, they never cap a row that moved,
 and what they leave out is totalled into their own "did not move" row rather
@@ -1136,14 +1136,22 @@ Ticket 14, the same detector set, one of the three states in another repository:
 orbit-context compare a7d7649 dc16a3e /home/user/agent-rules-books@782a886 --repo .
 
 COUNTS  every state's own figures beside every delta  [1.8eabab386316]
-  state                              a7d7649  dc16a3e  agent-r…@782a886   Δ C1    Δ C2
-  files walked                           201      323               515   +122    +314
-  bytes walked                       2172106  3239053          10432071      …       …
-  surfaces                                87      103               126    +16     +39
-  names that resolve to another name      14       14                14      0       0
-  two names for one file, folded          14       14                14      0       0
-  surface bytes                       781674   853575            946722 +71901 +165048
+  state                                  a7d7649  dc16a3e  agent-r…@782a886  dc16a3e-a7d7649  agen…2a886-a7d7649
+  files walked                               201      323               515             +122                +314
+  bytes walked                           2172106  3239053          10432071         +1066947            +8259965
+  files carrying a surface kind, folded       87      103               126              +16                 +39
+  surfaces                                    87      103               126              +16                 +39
+  of those, read in full                      87      103               126              +16                 +39
+  names that resolve to another name          14       14                14                0                   0
+  two names for one file, folded              14       14                14                0                   0
+  clauses                                   7560     7901              8089             +341                +529
+  pointers                                   224      314               344              +90                +120
+  surface bytes                           781674   853575            946722           +71901             +165048
 ```
+
+The whole section, as it printed. An evidence block is the last place an
+abridged table belongs: a row left out for width is a row a reader cannot check,
+and two of the rows above stand at zero.
 
 Three readings of that table, and each is in the ticket with the figures it
 rests on:

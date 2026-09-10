@@ -140,10 +140,15 @@ MAX_TEXT_WIDTH = 56
 
 # How wide a state's label is printed as a column heading, and how wide each
 # half of a delta heading is. Narrower than the label in the header block: the
-# header names every state in full, and the column heading only has to tell
-# them apart.
+# header names every state at HEADER_LABEL_WIDTH, and a column heading only has
+# to tell them apart.
 MAX_LABEL_WIDTH = 16
 DELTA_LABEL_WIDTH = 10
+
+# How wide a state's label, and a path, are printed in the header block and in
+# the fold section -- the two places a state is named rather than tabulated.
+HEADER_LABEL_WIDTH = 24
+HEADER_PATH_WIDTH = 48
 
 # Every edge kind this domain writes, listed at zero as well as at count.
 # Sourced from the modules that own them where one does, so that a rename
@@ -156,6 +161,11 @@ EDGE_KINDS = (
     provenance.PRODUCES_EDGE,
     ladders.RUNG_OF_EDGE,
 )
+
+# What a row whose own name resolves to another name is called, in the counts
+# and in the fold section both. One measurement, so one wording: a report
+# naming the same figure two ways reads as two figures that happen to agree.
+LINK_ROWS = "names that resolve to another name"
 
 # The key a file with no suffix, and a file at the repository root, are tallied
 # under. Empty in the store -- it is a key there, not a word -- and named here,
@@ -189,18 +199,6 @@ class Row:
     @property
     def moved(self) -> bool:
         return any(self.deltas)
-
-    @property
-    def before(self) -> int:
-        return self.values[0]
-
-    @property
-    def after(self) -> int:
-        return self.values[-1]
-
-    @property
-    def delta(self) -> int:
-        return self.after - self.before
 
 
 @dataclass(frozen=True)
@@ -290,14 +288,9 @@ class Comparison:
     database_path: str
 
     @property
-    def before(self) -> State:
-        """The baseline: the state every delta is taken against."""
+    def baseline(self) -> State:
+        """The state every delta is taken against."""
         return self.states[0]
-
-    @property
-    def after(self) -> State:
-        """The last state read. With two states, the one differenced to."""
-        return self.states[-1]
 
     @property
     def comparable(self) -> bool:
@@ -322,8 +315,7 @@ class Comparison:
             self.surfaces(),
             self._row("of those, read in full",
                       lambda state: state.surfaces_read_in_full),
-            self._row("names that resolve to another name",
-                      lambda state: state.link_rows),
+            self._row(LINK_ROWS, lambda state: state.link_rows),
             self._row("two names for one file, folded",
                       lambda state: state.surfaces_folded),
             self._row("clauses", lambda state: state.clauses),
@@ -668,6 +660,12 @@ def parse_state(text: str, default_repo: str | Path) -> StateSpec:
     would take a ref apart and then report the repository it invented as one
     that could not be read. Nothing on the left that is not a directory is a
     repository, so a ref keeps its own text.
+
+    **A relative path is resolved against the working directory, not against
+    ``default_repo``.** It was typed at a shell, where ``../other-repository``
+    means what the shell's own completion means by it; resolving it against a
+    repository the caller named separately would make the same text mean two
+    things depending on a flag somewhere else on the line.
     """
     default = Path(default_repo).resolve()
     positions = [index for index, character in enumerate(text) if character == "@"]
@@ -720,7 +718,11 @@ def _checkout(spec: StateSpec):
 
 
 def _reachable(tree: Path, commit: str) -> bool:
-    """Whether one clone holds the commit its state was named for."""
+    """Whether one clone holds the commit its state was named for.
+
+    Not through ``_git``: that helper turns a non-zero exit into an error, and
+    a non-zero exit is this function's answer rather than its failure.
+    """
     result = subprocess.run(
         ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
         cwd=tree, capture_output=True, text=True, check=False,
@@ -862,31 +864,31 @@ def _header(comparison: Comparison) -> list[str]:
     for position, state in enumerate(comparison.states):
         name = "baseline" if position == 0 else f"state {position}"
         lines.append(
-            f"  {name:<12} {_short(state.label, 24)}  {state.commit_sha[:12]}"
-            f"  {_short(state.origin, 48)}"
+            f"  {name:<12} {_short(state.label, HEADER_LABEL_WIDTH)}  {state.commit_sha[:12]}"
+            f"  {_short(state.origin, HEADER_PATH_WIDTH)}"
         )
     if comparison.comparable:
         lines.append(
-            f"  detectors    {comparison.before.detector_set_version}  "
+            f"  detectors    {comparison.baseline.detector_set_version}  "
             f"(every state)"
         )
     else:
         for state in comparison.states:
             lines.append(
                 f"  detectors    {state.detector_set_version}  "
-                f"{_short(state.label, 24)}"
+                f"{_short(state.label, HEADER_LABEL_WIDTH)}"
             )
         lines.append(f"  {NOT_COMPARABLE}.")
         lines.append(
             "  A change in the detectors and a change in the repository move "
             "the same numbers."
         )
-    if detectors.VERSION != comparison.before.detector_set_version:
+    if detectors.VERSION != comparison.baseline.detector_set_version:
         lines.append(
             f"  This build is {detectors.VERSION}; the counts below are what "
             "the set that wrote them found."
         )
-    lines.append(f"  graph        {_short(comparison.database_path, 48)}")
+    lines.append(f"  graph        {_short(comparison.database_path, HEADER_PATH_WIDTH)}")
     lines.append(
         "  Every state was indexed from a clone of its own commit, so no "
         "working tree"
@@ -923,7 +925,7 @@ def _labels(comparison: Comparison) -> list[str]:
 def _counts(comparison: Comparison) -> list[str]:
     return [
         _heading("COUNTS", "every state's own figures beside every delta",
-                 comparison.before.detector_set_version),
+                 comparison.baseline.detector_set_version),
         *_table(comparison.rows(), _labels(comparison)),
     ]
 
@@ -960,7 +962,7 @@ def _by_name(comparison: Comparison, title: str, summary: str,
     if still:
         listed = listed + [_still(rows, still, len(comparison.states))]
     lines = [
-        _heading(title, summary, comparison.before.detector_set_version),
+        _heading(title, summary, comparison.baseline.detector_set_version),
         *_table(listed, _labels(comparison)),
     ]
     unlisted = _unlisted(rows)
@@ -983,12 +985,13 @@ def _folds(comparison: Comparison) -> list[str]:
     """
     lines = [
         _heading("TWO NAMES FOR ONE FILE", "counted once, labelled by the target",
-                 comparison.before.detector_set_version)
+                 comparison.baseline.detector_set_version)
     ]
     for state in comparison.states:
         lines.append(
-            f"  {_short(state.label, 24)}  {state.link_rows} names resolving to "
-            f"another name, {state.link_bytes} bytes, {state.surfaces_folded} folded"
+            f"  {_short(state.label, HEADER_LABEL_WIDTH)}  "
+            f"{state.link_rows} {LINK_ROWS}, {state.link_bytes} bytes, "
+            f"{state.surfaces_folded} folded"
         )
         for fold in state.folds[:EXAMPLE_ROWS]:
             lines.append(
@@ -1035,7 +1038,7 @@ def _identical_bytes(comparison: Comparison) -> list[str]:
     ]
     return [
         _heading("IDENTICAL BYTES", "pairs, and what evidences them",
-                 comparison.before.detector_set_version),
+                 comparison.baseline.detector_set_version),
         *_table(rows, _labels(comparison)),
         "  Whether two identical files are intentionally identical stays UNKNOWN.",
     ]

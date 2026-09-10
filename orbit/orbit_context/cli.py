@@ -180,7 +180,7 @@ def build_parser() -> argparse.ArgumentParser:
         "states", nargs="+",
         help="Two or more states. The first is the baseline every other one is "
              "differenced against. A state is a git ref or commit in --repo, "
-             "or 'path@ref' for a state of another repository — the path is "
+             "or 'path@ref' for a state of another repository. The path is "
              "read only where it names a directory that is there, so a ref "
              "carrying an '@' of its own keeps its text.",
     )

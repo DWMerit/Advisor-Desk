@@ -212,16 +212,16 @@ The hypothesis this was to look at is governance bytes rising against product
 bytes in C2. **The share falls, and it falls furthest in C2.** Two things stop
 that being read as an answer either way:
 
-- **What is not a surface is not thereby product.** On this estate most of the
-  bytes these detectors do not recognise are the rule corpus itself — 198
-  Markdown files of distilled rules that no vendor named and that mostly do not
-  declare themselves. A share of surface bytes is a share of what the detectors
-  recognise, and calling the remainder product would assert something false.
-- **C2's denominator is one directory.** `evals/` is 7,656,107 of its
-  10,432,071 bytes, 73%, against nothing of the kind in C0 or C1. Excluding it
-  would give a different share; so would excluding anything else. This run picks
-  no denominator beyond the walk's own, because picking one is the metric spec
-  0002 §11 refuses.
+- **What is not a surface is not thereby product.** C0's 1,390,432 unrecognised
+  bytes are `books-ai-rules.png` at 726,004 (52%), `docs/` at 641,212 (46%),
+  the fourteen folded links at 812, and the rest of the root. A hero image and a
+  documentation tree. Calling that remainder product would assert something
+  false, and so would calling it anything else without naming it first.
+- **C2's denominator is one directory.** `evals/` is 7,643,760 of C2's
+  9,485,349 unrecognised bytes — captions, a tarball, a ledger — against nothing
+  of the kind in C0 or C1. Excluding it would give a different share; so would
+  excluding anything else. This run picks no denominator beyond the walk's own,
+  because picking one is the metric spec 0002 §11 refuses.
 
 No metric, threshold or alert was built, and nothing in the tool divides these
 two columns. They are printed beside each other, and the division above is a
@@ -240,6 +240,41 @@ Every figure above is a count or a byte total read off the rows, and the three
 statements that go beyond counting — the base is intact, the shared corpus is
 byte-identical, three files lost recognition to a share rule — are each shown
 above with the figures they rest on.
+
+## What the two-axis review found
+
+**One assertion in this ticket was false, and is corrected above.** It read:
+*"most of the bytes these detectors do not recognise are the rule corpus itself
+— 198 Markdown files of distilled rules that no vendor named and that mostly do
+not declare themselves."* Measured, C0's unrecognised bytes are one image and
+`docs/`; the rule corpus is almost entirely recognised, and 84 of C0's 87
+surfaces carry `declared-marker`, so they declare themselves rather than not.
+The point the sentence was making — that the remainder is not product — survives
+with the true figures, which is exactly why the false one was not needed.
+
+Recorded rather than quietly repaired. The pass mark says a single false
+assertion is a stop; this one was caught by review before the ticket closed, and
+a ticket that edits away a false finding without saying so teaches the next
+session nothing.
+
+**The evidence block in the README was hand-abridged.** Its heading row read
+`Δ C1  Δ C2`, which this tool cannot print, and it dropped four of the ten rows
+and both `bytes walked` deltas. Replaced with the run's own output, whole. An
+abridged table is the one place an evidence block must not be abridged, and the
+README's own rule is that every zero is printed.
+
+**Two accessors outlived their callers.** `Row.before`, `Row.after` and
+`Row.delta` had no production caller after the widening, and `Row.delta` had
+quietly come to mean *the last state, minus the first* — a name that says which
+of two subtractions it is only while there are two. Gone; the two-state reading
+is named in the tests, where the comparisons that have exactly two states are.
+`Comparison.before` is now `Comparison.baseline`, which is what the header calls
+it.
+
+**One measurement was printed under two wordings.** The counts said *names that
+resolve to another name* and the fold section said *names resolving to another
+name*. One constant now, read by both: a report naming one figure two ways reads
+as two figures that happen to agree.
 
 ## Decisions taken here
 
@@ -265,6 +300,14 @@ mtime, rather than asserting it was tidied up afterwards.
 **`bytes walked` is on the run row, and nothing divides it.** The walk's own
 figure, each entry taken by `lstat` so a link weighs its own name. It is the
 denominator the share above is read against, and the division stays in prose.
+
+It is a column rather than a figure this ticket measured once and threw away,
+which is a judgement call and was argued rather than assumed. A one-off weighing
+at compare time would be a second pass over a tree the counts were not taken
+against — the rule the two existing walk tallies are on the run row for. What
+spec 0002 §11 refuses is a metric: a division, a threshold, something that
+raises. A denominator printed beside its numerator is neither, and without it
+the share could not be retaken by anyone reading the table later.
 
 **The link count is printed beside the fold rather than inside it.** After the
 fold, fourteen links and fourteen full copies read the same. Before it, they do
