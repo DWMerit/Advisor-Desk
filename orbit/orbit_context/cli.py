@@ -1,7 +1,8 @@
 """``orbit-context`` — the context-domain indexer for Orbit's local graph.
 
-Three commands. ``index`` writes the graph; ``show`` reads one clause back out
-of the file it came from, at the byte offsets the graph recorded; ``repo-map``
+Four commands. ``index`` writes the graph; ``migrate`` brings an existing store
+to the ontology when the two have parted; ``show`` reads one clause back out of
+the file it came from, at the byte offsets the graph recorded; ``repo-map``
 prints one repository's governance surface, read from the graph, inside a stated
 budget.
 
@@ -17,7 +18,7 @@ import json
 import sys
 
 from . import history, repomap, retrieve, store
-from .indexer import index
+from .indexer import index, migrate
 from .ontology import OntologyError
 from .store import StoreError
 from .workspace import GitError
@@ -45,6 +46,27 @@ def build_parser() -> argparse.ArgumentParser:
     index_parser.add_argument(
         "-s", "--stats", action="store_true",
         help="Include per-file skipped and errored detail in the output",
+    )
+
+    migrate_parser = subparsers.add_parser(
+        "migrate",
+        help="Remove columns the ontology no longer declares, where they hold "
+             "no values",
+    )
+    migrate_parser.add_argument(
+        "--db", dest="db_path", default=str(store.DEFAULT_DB_PATH),
+        help="Override the DuckDB path (default: ~/.orbit-context/context.duckdb)",
+    )
+    migrate_parser.add_argument(
+        "--ontology", dest="ontology_root", default=None,
+        help="Override the ontology root (default: orbit/ontology)",
+    )
+    migrate_parser.add_argument(
+        "--remove-values", dest="remove_values", action="store_true",
+        help="Also remove a column that is holding values, and what it holds. "
+             "Without this the migration stops and names such a column: "
+             "whether what it holds is a leftover or data is not something "
+             "this tool can tell, so it is a decision taken here, by hand.",
     )
 
     show_parser = subparsers.add_parser(
@@ -118,15 +140,20 @@ def main(argv: list[str] | None = None) -> int:
         except (OntologyError, StoreError, GitError) as error:
             print(f"orbit-context: {error}", file=sys.stderr)
             return 1
-        for table in statistics["schema"]:
-            undeclared = table["columns_not_declared_in_ontology"]
-            if undeclared:
-                print(
-                    f"orbit-context: {table['table']} carries columns the "
-                    f"ontology does not declare: {', '.join(undeclared)}",
-                    file=sys.stderr,
-                )
+        # No warning loop over `schema` here: a table carrying a column the
+        # ontology does not declare raises SchemaDrift above, so by this line
+        # `columns_not_declared_in_ontology` is empty on every table.
         print(json.dumps(statistics, indent=2))
+        return 0
+
+    if args.command == "migrate":
+        try:
+            report = migrate(args.db_path, ontology_root=args.ontology_root,
+                             remove_values=args.remove_values)
+        except (OntologyError, StoreError) as error:
+            print(f"orbit-context: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps(report, indent=2))
         return 0
 
     if args.command == "show":

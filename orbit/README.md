@@ -40,6 +40,9 @@ orbit/bin/orbit-context index /home/user --stats
 
 # Somewhere other than ~/.orbit-context/context.duckdb.
 orbit/bin/orbit-context index /home/user --db /tmp/scratch.duckdb
+
+# Bring a store whose columns have parted from the ontology back to it.
+orbit/bin/orbit-context migrate --db /tmp/scratch.duckdb
 ```
 
 Then read one rule back, by name, out of the file it lives in:
@@ -220,6 +223,25 @@ carry are NULL on its rows.
 
 The indexer builds each DuckDB table from that file's `storage.columns`. Adding a
 column to the YAML adds it to the table on the next index; no Python change.
+
+Removing one from the YAML is the direction the YAML cannot describe, so it is
+read off the store instead, and it **fails the run** — before a row is written,
+naming the table, the column and the command that resolves it. Not a migration
+the run performs on its own: removing a column cannot be undone, and a run that
+prints `surfaces: 214` while having removed one is a run whose number cannot be
+read afterwards. A count is exactly the thing that cannot show the difference
+between the estate changing and the schema changing.
+
+`orbit-context migrate` is that command. It removes a column the ontology does
+not declare **where it holds no values**, and where one does hold values it names
+it with the number of rows and alters nothing at all — not the columns that would
+otherwise have gone, nor the declared columns it would have added, because a
+store half at one schema and half at another is harder to read than the drift. `--remove-values` takes such a column and what
+it holds, and is a decision made by hand on the command line rather than a
+default: whether those values are a leftover or data is not something this tool
+can tell. The report carries each table's row count either side, because removing
+a column is the cheapest place to move a number without noticing, and the
+declared columns it added as well as the ones it removed.
 
 An edge type is declared once and carries the `from_node`/`to_node` pairs it is
 allowed between, rather than being declared once per pair. Those `variants` are
@@ -688,6 +710,23 @@ of the ladder reported even at zero. Skipped entries carry
 indexed root, and `schema` reports, per table, which columns the YAML added and
 which the table carries that the YAML does not declare.
 
+`replaced` says how many rows the run took out of the store to put its own in,
+per table, at estate level and per repository. Zero everywhere on a first index.
+Without it a total that did not move reads the same whether the run replaced its
+own snapshot or wrote nothing at all.
+
+`store` is what else is in there. One store holds many repositories and many
+snapshots of each — that is the design — so a count read out of it is only
+interpretable beside the rest of its contents. The block lists every snapshot the
+store holds with its `branch`, `commit_sha`, `indexed_at`, `detector_set_version`
+and the rows it holds per table, marks each `indexed_by_this_run` or not, and
+counts `repositories_from_other_detector_sets`. That last one is the reason the
+detector version exists: a change in the detectors and a change in the estate
+move the same numbers, and the version beside each snapshot is what separates
+them. `rows_outside_a_recorded_run` names rows whose snapshot no run row accounts
+for — normally empty, and never folded into a total that would read as if they
+carried a version and a time.
+
 ## Re-indexing
 
 Re-indexing replaces the rows for the indexed
@@ -697,6 +736,11 @@ edge types share `gl_context_edge`, and a second replacement for the same
 snapshot would delete what the first had just written. `project_id` is part of that key because every local row carries the same
 empty `traversal_path`. Row ids are derived from the same tuple plus the path,
 so they are stable across re-index.
+
+Every clause of that key is also what keeps one repository's re-index off
+another's rows: the store holds many repositories, and a replacement that
+dropped any clause of the key would take rows the run never looked at. What it
+did take is reported as `replaced`.
 
 Snapshots on different commits coexist, which is Orbit's own semantics. A commit
 that moves leaves the previous snapshot's rows in place.
@@ -715,9 +759,10 @@ that moves leaves the previous snapshot's rows in place.
 - `gl_context_surface` in the live graph carries four columns from an earlier
   prototype — `client`, `activation`, `evidence_class`, `detector`. All four are
   phase 2/3 candidates gated behind the tests in spec §6, so phase 1 does not
-  declare or write them. The indexer leaves them alone and names them on stderr.
-  Dropping the table so it matches the ontology exactly is a decision for Dylan,
-  not something the indexer does on its own.
+  declare or write them. **Decided by ticket 09:** the run no longer leaves them
+  alone. It refuses, names them, and names `orbit-context migrate`. Where the
+  prototype rows still hold values in those columns, `migrate` refuses in turn
+  and names them, and `--remove-values` is the decision Dylan takes by hand.
 - The indexed roots, and whether `~/.claude/` and other user-global surfaces are
   inside them, are spec §12 items and still Dylan's to set. `index` takes
   whatever path it is given.

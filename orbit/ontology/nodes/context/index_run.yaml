@@ -90,6 +90,13 @@ properties:
     mutable: false
     description: "Absolute path the index invocation started from. Equal to path where a repository was indexed directly, and above it where the invocation covered an estate of several repositories."
 
+  indexed_at:
+    type: datetime
+    source: indexed_at
+    nullable: false
+    mutable: false
+    description: "When this run wrote the snapshot, UTC. A store holds many repositories and many snapshots of each, and a count read out of one of them is only interpretable beside the moment it was taken -- two snapshots of a repository are told apart by commit, and two runs over the same commit only by this."
+
   detector_set_version:
     type: string
     source: detector_set_version
@@ -131,6 +138,7 @@ storage:
     - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: path, type: "String", codec: ["ZSTD(3)"]}
     - {name: indexed_root, type: "String", codec: ["ZSTD(3)"]}
+    - {name: indexed_at, type: "DateTime64", codec: ["ZSTD(1)"]}
     - {name: detector_set_version, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: excluded_directories, type: "String", codec: ["ZSTD(3)"]}
     - {name: files_walked, type: "Int64", codec: ["T64", "ZSTD(1)"]}

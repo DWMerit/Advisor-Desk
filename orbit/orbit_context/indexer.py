@@ -6,6 +6,7 @@ import hashlib
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import clauses as clause_module
@@ -71,6 +72,10 @@ class RepoResult:
     # The walk, and how much of it these detectors recognise anything in.
     files_walked: int = 0
     files_with_surface_kind: int = 0
+    # Rows this repository's write took out of the store, per table. Zero on a
+    # first index; on a re-index it is what the run stood on top of, and a
+    # reader can tell that from a total that did not move.
+    replaced: dict = field(default_factory=dict)
 
 
 _DIGESTS: dict[tuple, str] = {}
@@ -406,7 +411,13 @@ def _count(result: RepoResult, path: str, reason: str, detail: str, errored: boo
     )
 
 
+def _now() -> datetime:
+    """This run's moment, UTC and naive -- the shape a DuckDB TIMESTAMP holds."""
+    return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+
+
 def _run_row(node: NodeType, repo: Repository, indexed_root: Path,
+             indexed_at: datetime,
              files_walked: int, files_with_surface_kind: int) -> dict:
     """The one row saying what this run covered, and which detectors read it.
 
@@ -422,6 +433,7 @@ def _run_row(node: NodeType, repo: Repository, indexed_root: Path,
         "commit_sha": repo.commit_sha,
         "path": str(repo.root),
         "indexed_root": str(indexed_root),
+        "indexed_at": indexed_at,
         "detector_set_version": detectors.VERSION,
         "excluded_directories": ", ".join(sorted(surfaces.PRUNED_DIRECTORIES)),
         "files_walked": files_walked,
@@ -457,7 +469,8 @@ def _coverage_rows(node: NodeType, repo: Repository,
 
 def index_repository(connection, ontology: ontology_module.Ontology, repo: Repository,
                      nested_repos: list[Path],
-                     indexed_root: Path | None = None) -> RepoResult:
+                     indexed_root: Path | None = None,
+                     indexed_at: datetime | None = None) -> RepoResult:
     """Index one repository: surfaces, clauses, and the pointers between them.
 
     Two passes, because a pointer can only be resolved once every surface in the
@@ -563,16 +576,18 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
         (tables[contains.table], edge_rows),
         (tables[run_node.table],
          [_run_row(run_node, repo, indexed_root or repo.root,
+                   indexed_at or _now(),
                    result.files_walked, result.files_with_surface_kind)]),
         (tables[coverage_node.table],
          _coverage_rows(coverage_node, repo, result.coverage)),
     ):
-        store.replace_rows(
+        moved = store.replace_rows(
             connection, shape, LOCAL_TRAVERSAL_PATH, repo.project_id,
             repo.branch, repo.commit_sha,
             [{name: values.get(name) for name in shape.column_names}
              for values in written],
         )
+        result.replaced[shape.table] = moved["replaced"]
     return result
 
 
@@ -605,11 +620,39 @@ def _coverage(files_walked: int, files_with_surface_kind: int) -> dict:
     }
 
 
+def _replaced_totals(results: list[RepoResult]) -> dict[str, int]:
+    """Rows this run took out of the store, per table, across every repository."""
+    totals: dict[str, int] = {}
+    for result in results:
+        for table, count in result.replaced.items():
+            totals[table] = totals.get(table, 0) + count
+    return totals
+
+
 def _coverage_totals(results: list[RepoResult]) -> dict:
     return _coverage(
         sum(result.files_walked for result in results),
         sum(result.files_with_surface_kind for result in results),
     )
+
+
+def migrate(db_path: str | Path = store.DEFAULT_DB_PATH,
+            ontology_root: str | Path | None = None,
+            remove_values: bool = False) -> dict:
+    """Bring a store to the ontology by removing columns it no longer declares.
+
+    The remedy `index` names when it refuses. Separate from indexing on
+    purpose: what it does cannot be undone, so it is a command somebody runs
+    having read why, rather than a step inside a run whose output is a count.
+    """
+    ontology = ontology_module.load(ontology_root)
+    connection = store.connect(db_path)
+    try:
+        report = store.migrate(connection, ontology.tables, remove_values)
+    finally:
+        connection.close()
+    report["database_path"] = str(Path(db_path))
+    return report
 
 
 def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
@@ -624,6 +667,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
     results: list[RepoResult] = []
     unreadable_repos: list[dict] = []
 
+    indexed_at = _now()
     connection = store.connect(db_path)
     try:
         sources = ontology.table_sources()
@@ -637,6 +681,11 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
             }
             for shape in ontology.tables
         ]
+        # Before a row is written, not after. A run that indexes first and
+        # reports the mismatch afterwards has already added rows to a store
+        # whose shape it just called into question, and the counts it prints
+        # cannot be compared with the run before it. See store.SchemaDrift.
+        store.assert_matches_ontology(connection, ontology.tables, Path(db_path))
         for repo_root in repo_roots:
             nested = [other for other in repo_roots
                       if other != repo_root and repo_root in other.parents]
@@ -648,9 +697,21 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                      "detail": str(error)}
                 )
                 continue
-            results.append(index_repository(connection, ontology, repo, nested, root))
+            results.append(
+                index_repository(connection, ontology, repo, nested, root, indexed_at)
+            )
+        held = store.snapshots(connection, ontology.tables, detectors.VERSION)
+        unaccounted = store.rows_outside_a_recorded_run(connection, ontology.tables)
     finally:
         connection.close()
+
+    written_now = {
+        (result.project_id, result.branch, result.commit_sha) for result in results
+    }
+    for entry in held:
+        entry["indexed_by_this_run"] = (
+            entry["project_id"], entry["branch"], entry["commit_sha"]
+        ) in written_now
 
     outside = [
         {"path": candidate.relative_path,
@@ -687,7 +748,24 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
             "skipped_files": len(skipped),
             "errored_files": len(errored),
         },
+        # What this run took out of the store to put its own rows in. Zero
+        # everywhere on a first index; on a re-index it is the run before this
+        # one, and without it a total that did not move reads the same whether
+        # the run replaced its own snapshot or wrote nothing at all.
+        "replaced": _replaced_totals(results),
         "database_path": str(Path(db_path)),
+        # Every repository the store holds, not only the ones just indexed. A
+        # count read from a store is only interpretable if what else is in
+        # there is on the same screen.
+        "store": {
+            "database_path": str(Path(db_path)),
+            "detector_set_version": detectors.VERSION,
+            "repositories": held,
+            "repositories_from_other_detector_sets": sum(
+                1 for entry in held if not entry["detector_set_is_current"]
+            ),
+            "rows_outside_a_recorded_run": unaccounted,
+        },
         "repositories": [
             {
                 "repository": result.repository,
@@ -709,6 +787,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                     "skipped_files": len(result.skipped),
                     "errored_files": len(result.errored),
                 },
+                "replaced": dict(result.replaced),
             }
             for result in results
         ],
