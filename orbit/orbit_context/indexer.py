@@ -69,6 +69,11 @@ class RepoResult:
     # coverage table. Kept separate so the JSON statistics keep the shape
     # Orbit's own `index` output uses.
     coverage: list[dict] = field(default_factory=list)
+    # Surfaces by how they were recognised. Reported beside the count rather
+    # than folded into it: two of the three values are the estate's own
+    # statement about a file and the third is this tool's reading of a
+    # directory, and a total says which is which about none of them.
+    recognition: dict = field(default_factory=dict)
     # The walk, and how much of it these detectors recognise anything in.
     files_walked: int = 0
     files_with_surface_kind: int = 0
@@ -128,6 +133,7 @@ def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
         "path": detected.relative_path,
         "name": detected.name,
         "surface_kind": detected.kind,
+        "recognition": detected.recognition,
         "content_sha256": _digest(repo.root / detected.relative_path),
         "size_bytes": detected.size_bytes,
         "frontmatter_bytes": detected.frontmatter_bytes,
@@ -555,6 +561,7 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     edge_rows.extend(_identical_byte_edges(identical_bytes, repo, matched))
     edge_rows.extend(_produces_edges(produces, repo, productions))
 
+    result.recognition = _recognition_tally(rows.values())
     result.files_walked = len(walked)
     # Distinct paths, not rows. A settings file is one file however many hooks
     # it holds, and a hook target is the same file seen from another angle.
@@ -603,6 +610,36 @@ def _external_totals(results: list[RepoResult]) -> dict[str, int]:
         for sub_kind, count in result.external_refs.items():
             totals[sub_kind] = totals.get(sub_kind, 0) + count
     return totals
+
+
+def _recognition_tally(rows) -> dict:
+    """Surfaces per recognition value, every value present even at zero.
+
+    Present at zero on purpose. A repository with no inferred rows and a
+    repository the inference was never applied to read the same if the key is
+    simply absent, and they are not the same thing.
+
+    Counted over rows that indexed, which is what ``surfaces`` beside it counts.
+    A candidate that could not be read still becomes a row carrying its reason,
+    and folding those in here would print a split that does not add up to the
+    total it sits next to.
+    """
+    tally = {value: 0 for value in surfaces.RECOGNITION_KINDS}
+    for row in rows:
+        if row.get("reason"):
+            continue
+        value = row.get("recognition")
+        if value in tally:
+            tally[value] += 1
+    return tally
+
+
+def _recognition_totals(results: list[RepoResult]) -> dict:
+    """The same tally across every repository this run indexed."""
+    return {
+        value: sum(result.recognition.get(value, 0) for result in results)
+        for value in surfaces.RECOGNITION_KINDS
+    }
 
 
 def _coverage(files_walked: int, files_with_surface_kind: int) -> dict:
@@ -735,6 +772,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
         "graph": {
             "repositories": len(results),
             "surfaces": sum(result.surfaces for result in results),
+            "recognition": _recognition_totals(results),
             "clauses": sum(result.clauses for result in results),
             "edges": sum(result.edges for result in results),
             "pointers": sum(result.pointers for result in results),
@@ -775,6 +813,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                 "commit_sha": result.commit_sha,
                 "graph": {
                     "surfaces": result.surfaces,
+                    "recognition": dict(result.recognition),
                     "clauses": result.clauses,
                     "edges": result.edges,
                     "pointers": result.pointers,

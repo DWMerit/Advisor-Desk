@@ -47,10 +47,16 @@ Advisor-Desk at `main`: **201 files, 198 of them markdown.**
 | group | count |
 |---|---|
 | book directories | 14 |
-| published rule files (`<book>/<book>[.mini|.nano].md`) | 43 |
+| published rule files (`<book>/<book>[.mini|.nano].md`) | 42 |
 | `_rule-workbench/` files | 45 |
 | `docs/` files | 95 |
-| `README.md`, `LICENSE`, `.gitignore`, one `.png` | 4 |
+| `README.md`, `CHANGELOG.md`, `LICENSE`, `.gitignore`, one `.png` | 5 |
+| `_rule-workbench/<book>/full.md` symlinks, never walked | 14 |
+
+Two figures corrected by ticket 10, which reconciled against this table rather
+than counting again: published rule files were written down as 43 and are 42 —
+14 books at three rungs — and `CHANGELOG.md` was missing from the root group.
+42 + 45 + 95 + 5 + 14 = 201, the total this ticket already states.
 
 Byte-identical pairs found by phase 1: **28**, with provenance: **0**.
 One ladder, for reference: `refactoring.md` 17,866 / `.mini.md` 5,167 /

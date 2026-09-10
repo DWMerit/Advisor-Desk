@@ -92,6 +92,12 @@ class RepoMap:
     files_with_surface_kind: int = 0
 
     coverage_notes: list[tuple[str, int, int]] = field(default_factory=list)
+    # Files per recognition value. Two of the three values are the estate's own
+    # statement about a file; the third is this tool reading the directory it
+    # sits in. A coverage figure that folded them together would put a reading
+    # and a declaration behind one number, which is the thing the column exists
+    # to stop.
+    recognition_by_kind: dict[str, int] = field(default_factory=dict)
     surfaces_by_kind: dict[str, tuple[int, int, int]] = field(default_factory=dict)
     # Rows carrying a reason: a surface that was found and not read through. A
     # candidate that cannot be read still becomes a row, so the row count and
@@ -117,6 +123,14 @@ class RepoMap:
     @property
     def files_with_no_surface_kind(self) -> int:
         return self.files_walked - self.files_with_surface_kind
+
+    @property
+    def inferred_recognitions(self) -> int:
+        """Files recognised by this tool's reading rather than by declaration."""
+        return sum(
+            self.recognition_by_kind.get(value, 0)
+            for value in surfaces.INFERRED_RECOGNITIONS
+        )
 
     @property
     def surface_rows(self) -> int:
@@ -209,6 +223,15 @@ def _read_graph(connection, snapshot: list, result: RepoMap) -> None:
         _scoped(connection, _SURFACE_UNREAD_SQL, snapshot)[0][0] or 0
     )
 
+    result.recognition_by_kind = {
+        value: 0 for value in surfaces.RECOGNITION_KINDS
+    }
+    for value, files in _scoped(connection, _RECOGNITION_SQL, snapshot):
+        name = value if value in result.recognition_by_kind else RECOGNITION_NOT_RECORDED
+        result.recognition_by_kind[name] = (
+            result.recognition_by_kind.get(name, 0) + int(files)
+        )
+
     result.clauses_by_type = {clause_type: 0 for clause_type in CLAUSE_TYPES}
     for clause_type, count in _scoped(connection, _CLAUSE_SQL, snapshot):
         result.clauses_by_type[clause_type] = int(count)
@@ -284,6 +307,20 @@ _COVERAGE_SQL = (
 
 _SURFACE_SQL = (
     "SELECT surface_kind, count(*), count(DISTINCT path), sum(size_bytes) "
+    f"FROM gl_context_surface WHERE {_SNAPSHOT} GROUP BY 1"
+)
+
+# What a row written before `recognition` existed carries. Reported under its own
+# name rather than dropped: a snapshot whose rows all fall outside the table
+# would otherwise print an all-zero split beside a surface count that is not
+# zero, which is the reading the zero-filled tally exists to prevent.
+RECOGNITION_NOT_RECORDED = "not-recorded"
+
+# Distinct files, not rows: a settings file holding four hooks was recognised
+# once, and counting its rows would report one vendor name four times. This is
+# the figure `files carrying a surface kind` above it counts, so the two add up.
+_RECOGNITION_SQL = (
+    "SELECT recognition, count(DISTINCT path) "
     f"FROM gl_context_surface WHERE {_SNAPSHOT} GROUP BY 1"
 )
 
@@ -429,6 +466,11 @@ def _coverage(result: RepoMap) -> list[str]:
         f"  files carrying no surface kind    {result.files_with_no_surface_kind}",
         "  Every count below is of what this detector set looks for. A low count",
         "  is a statement about these detectors, not a description of the estate.",
+        "",
+        "  recognised by",
+        *_rows(list(result.recognition_by_kind.items()), indent="    "),
+        f"  of which read off a directory rather than stated by the estate:"
+        f" {result.inferred_recognitions}",
     ]
 
 

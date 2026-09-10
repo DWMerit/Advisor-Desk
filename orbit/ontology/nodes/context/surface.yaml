@@ -11,7 +11,7 @@ node_type: Surface
 domain: context
 description: Something that can place text into an assistant session -- a file, or an entry inside one
 label: path
-default_columns: [id, path, name, surface_kind, size_bytes, commit_sha]
+default_columns: [id, path, name, surface_kind, recognition, size_bytes, commit_sha]
 destination_table: gl_context_surface
 sort_key: [traversal_path, project_id, branch, id]
 
@@ -84,6 +84,20 @@ properties:
     nullable: false
     mutable: false
     description: "instruction-surface | skill-package | agent-definition | command-definition | hook-definition | mcp-config | hook-target."
+    selectivity: low
+
+  recognition:
+    type: string
+    source: recognition
+    nullable: false
+    mutable: false
+    description: "How this surface was recognised: vendor-name | declared-marker
+      | corpus-adjacent. The first two are statements the estate made itself --
+      a filename a vendor defined, or a heading the file opens with.
+      `corpus-adjacent` is not: it is read off the directory the file sits in,
+      and is the one value here that is inferred rather than declared. Recorded
+      as its own column so a query can exclude what was inferred, which a count
+      that folded the three together could not."
     selectivity: low
 
   content_sha256:
@@ -183,6 +197,7 @@ storage:
     - {name: path, type: "String", codec: ["ZSTD(3)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: surface_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: recognition, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: content_sha256, type: "String", codec: ["ZSTD(1)"]}
     - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: frontmatter_bytes, type: "Int64", codec: ["T64", "ZSTD(1)"]}

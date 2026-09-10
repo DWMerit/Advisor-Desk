@@ -62,6 +62,12 @@ class TestVocabulary(unittest.TestCase):
         for kind in set(surfaces.SURFACE_KINDS) | detected:
             self.assertEqual(offending_words(kind), [], kind)
 
+    def test_recognition_kinds(self):
+        # Written to a column and printed beside every count, so they are this
+        # tool's words rather than the estate's.
+        for kind in surfaces.RECOGNITION_KINDS:
+            self.assertEqual(offending_words(kind), [], kind)
+
     def test_hook_command_resolutions(self):
         for name in dir(settings):
             if name.startswith("RESOLUTION_"):

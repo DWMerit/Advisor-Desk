@@ -31,12 +31,17 @@ class TestSurfaceYaml(unittest.TestCase):
     def test_destination_table_is_a_context_table(self):
         self.assertTrue(self.node.table.startswith("gl_context_"))
 
-    def test_phase_one_columns(self):
+    def test_declared_columns(self):
+        # `recognition` is the one addition since phase 1, made by ticket 10:
+        # recognition stopped being a single rule, so how a surface was found
+        # stopped being derivable from the fact that it was found. Every other
+        # column here is phase 1's. This assertion is the reason the addition
+        # could not be made quietly, which is what it is for.
         self.assertEqual(
             self.node.column_names,
             ("id", "traversal_path", "project_id", "branch", "commit_sha",
-             "path", "name", "surface_kind", "content_sha256", "size_bytes",
-             "frontmatter_bytes",
+             "path", "name", "surface_kind", "recognition", "content_sha256",
+             "size_bytes", "frontmatter_bytes",
              "body_bytes", "start_line", "end_line", "matcher", "target_path",
              "target_resolution", "reason"),
         )
