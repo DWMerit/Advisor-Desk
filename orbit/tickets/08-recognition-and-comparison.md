@@ -2,10 +2,10 @@
 
 Spec: `orbit/specs/0002-recognition-and-the-three-state-comparison.md`
 
-Six tickets. Work top to bottom; each is blocked by the one before it, because
+Seven tickets. Work top to bottom; each is blocked by the one before it, because
 each measures something the previous one made measurable.
 
-**Four are done. The frontier is 13.**
+**Four are done. The frontier is 15.**
 
 | # | Ticket | Blocked by | State |
 |---|---|---|---|
@@ -13,8 +13,17 @@ each measures something the previous one made measurable.
 | 10 | A rule file is a surface | 09 | done |
 | 11 | The ladder is queryable | 10 | done |
 | 12 | Workbench to published carries a direction where evidence allows | 11 | done |
-| 13 | Two states compare | 12 | **frontier** |
+| 15 | A symlink is a node, never read | — | **frontier** |
+| 13 | Two states compare | 12, 15 | |
 | 14 | Three states, and ticket 07 re-scoped | 13 | |
+
+**15 is out of numerical order on purpose.** It was written after 12 and belongs
+before 13: it moves `files_walked` and the detector set version, and spec 0002's
+own rule is that two counts either side of a detector change are not comparable.
+Run after the comparison, every figure 13 and 14 record is from a superseded
+detector set. Renumbering the batch to make the order read left to right would
+break every reference already in the tickets and the git history, so the order
+is stated instead.
 
 Each closed ticket carries its own acceptance run as evidence, hand-checked and
 never asserted in a test.
@@ -23,6 +32,14 @@ never asserted in a test.
 longer declares and holds a prior index of another repository. Every count taken
 against it is arguable until neither is true. Nothing else in this batch is worth
 measuring first.
+
+**Second prefactoring, found at ticket 12: ticket 15.** Our walk refuses
+symlinks; GitLab Orbit's lists them as nodes it never reads, with a reason of its
+own (`non_regular_file`). That is a divergence from the tool this project exists
+to emulate faithfully, it is invisible in every count taken so far, and it is
+carried by all three comparison states — so a three-state comparison run on the
+current walk measures our divergence in each of them and calls the result a
+finding about governance. Same argument as 09, found later.
 
 ## What this batch is
 
@@ -56,7 +73,11 @@ Advisor-Desk at `main`: **201 files, 198 of them markdown.**
 | `_rule-workbench/` files | 45 |
 | `docs/` files | 95 |
 | `README.md`, `CHANGELOG.md`, `LICENSE`, `.gitignore`, one `.png` | 5 |
-| `_rule-workbench/<book>/full.md` symlinks, never walked | 14 |
+| `_rule-workbench/<book>/full.md` symlinks | 14 |
+
+The fourteen symlinks were written down as *never walked*. Ticket 15 changes that
+sentence, not the count: they are walked, listed as nodes and never read, which is
+what GitLab Orbit does with a symlink. The 201 total does not move.
 
 Two figures corrected by ticket 10, which reconciled against this table rather
 than counting again: published rule files were written down as 43 and are 42 —

@@ -1,6 +1,6 @@
 # 13 — Two states compare
 
-**Blocked by:** 12
+**Blocked by:** 12, **15**
 **Demo when done:** one command, C0 against C1, a table of deltas — run from the
 command line, the way it will actually be run.
 
@@ -36,6 +36,29 @@ built a tool and left the rule corpus alone — outside `orbit/`, `main..HEAD` i
 two lines of `.gitignore`. If the comparison reports governance added by C1, the
 comparison is wrong, not the repository.
 
+## Two names for one file are one file
+
+GitLab's rule, not ours, and it arrives with ticket 15's walk: a symlink is a
+node, so a repository holding `CLAUDE.md -> AGENTS.md` now holds two rows for one
+file. `crates/orbit-local/src/commands/setup.rs:265-271` canonicalises the paths
+and keeps one entry, labelled by the **target**; the test at `:292` writes
+`AGENTS.md`, symlinks `CLAUDE.md` to it, and asserts one entry named `AGENTS.md`.
+
+The comparison has to apply that, because the row this ticket turns on is
+`governance surfaces: delta 0`. Fourteen symlinked `full.md` files sit in both
+states; counted as governance in one and not the other, the zero moves and the
+comparison reports a session adding rules it did not write.
+
+Note what the rule is *not*. Same-inode is a stronger statement than the byte
+identity ticket 12 measures: byte-identical says "same content, cause unknown",
+and same-inode says "same file". So the target being the surviving name is an
+**observed** ordering, and it does not reopen ticket 12's UNKNOWN — two files
+that merely hash the same are still unordered, and nothing here changes that.
+
+- Deduplicate by canonical path, keeping the target's name.
+- Report how many rows were folded, per state. A dedupe that silently changes a
+  count is the failure mode this whole batch exists to catch.
+
 ## Acceptance
 
 - [ ] C0 is indexed without checking anything out over the working tree
@@ -43,6 +66,8 @@ comparison is wrong, not the repository.
 - [ ] Both states carry the same detector version, and the output states it
 - [ ] The comparison runs from the command line and its exit code is meaningful
 - [ ] Deltas are counts and bytes; nothing is characterised
+- [ ] Two names for one file count once, labelled by the target, and the number
+      folded is reported per state rather than absorbed into the total
 - [ ] Output contains no forbidden vocabulary word
 
 ## Watch for

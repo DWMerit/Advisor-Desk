@@ -17,8 +17,10 @@ and its fourteen three-rung ladders are a first-class edge that can be asked for
 by book. Its 28 byte-identical pairs each carry a direction or an explicit
 UNKNOWN with the reason, and on this corpus all 28 are UNKNOWN — the relationship
 is stated only in prose, and prose provenance stays a permanent UNKNOWN.
-Recognition is no longer what blocks 07; tickets 13 and 14 are.
-**The frontier is 13**, tracked in `08-recognition-and-comparison.md`.
+Recognition is no longer what blocks 07; tickets 15, 13 and 14 are.
+**The frontier is 15**, tracked in `08-recognition-and-comparison.md` — a
+divergence from GitLab Orbit found while closing 12, which has to be closed
+before the comparison runs or the comparison measures it.
 
 | # | Ticket | Blocked by |
 |---|---|---|

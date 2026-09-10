@@ -12,6 +12,17 @@ C1 did not — outside `orbit/`, `main..HEAD` is two lines of `.gitignore`, so
 known. If C2 rewrote its base, the two deltas are not the same kind of
 measurement, and the report says so rather than tabling them side by side.
 
+**The fourteen `full.md` symlinks are a cheap first test of exactly that.** C0
+carries them as symlinks (`10f71b9`, git mode `120000`, authored upstream on
+2026-04-26 and never touched since), so C2 inherited them. Ticket 15 makes a
+symlink a node with its own size, which means the question can be asked of the
+rows rather than by hand: if C2 holds fourteen 32-byte links, its base is intact
+in this respect; if it holds fourteen full-sized regular files, something
+resolved them, and a copy that no longer tracks its source is a base rewrite
+whatever else the diff says. Either answer is a result. Report it before any
+delta is read as comparable, and report which of the two it is rather than only
+that they differ.
+
 Then produce the comparison:
 
 | state | what it is |
@@ -22,6 +33,14 @@ Then produce the comparison:
 
 **agent-rules-books is read-only.** Index it. Never write to it, never push to
 it, never open a pull request against it.
+
+**Ticket 13's dedupe applies to all three states, and C2 is where it can bite.**
+Two names for one file count once, labelled by the target — GitLab's rule at
+`crates/orbit-local/src/commands/setup.rs:265-271`. A repository that grew its own
+governance layer is exactly the shape that acquires a `CLAUDE.md` symlinked to an
+`AGENTS.md`, or a rule file exposed under two names, and counting those twice
+would report governance growth that is one file wearing two hats. Report the
+number folded per state beside the counts, never inside them.
 
 **One question is asked here, not built.** The collapse in C2 plausibly shows up
 as governance bytes rising against product bytes. Report the ratio for all three
@@ -56,6 +75,10 @@ gap, which is a result.
 ## Acceptance
 
 - [ ] agent-rules-books attached, indexed, and never written to
+- [ ] Whether C2 still carries the fourteen `full.md` symlinks is established
+      from the rows and stated, either way, as part of the base-rewrite question
+- [ ] Two names for one file count once in every state, with the number folded
+      reported per state
 - [ ] Whether C2 rewrote its base is established and stated before any delta is
       read as comparable
 - [ ] The three-state table is produced, with absolute figures beside every delta

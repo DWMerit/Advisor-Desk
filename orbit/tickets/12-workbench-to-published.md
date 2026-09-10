@@ -147,9 +147,25 @@ It still is not a direction. A symlink says two names are one file, which is a
 stronger statement than byte identity and a different one from production: it
 does not say either name was produced from the other. So reading these would
 give the estate an observed *relation* it does not currently have, not the
-direction this ticket was asked for. Recorded here because it is the one place
-the corpus states a relationship somewhere a tool can read it, and because
-deciding what a symlink means is a spec question rather than a detector tweak.
+direction this ticket was asked for.
+
+**And "what does a symlink mean" turned out not to be ours to decide.** This was
+first recorded here as an open spec question. It is not one: GitLab Orbit has
+already answered it, a symlink is a node that is listed and never read
+(`crates/utils/src/walk.rs:37-57`), with its own skip reason, `non_regular_file`.
+Our walk refuses them outright at `surfaces.py:414`, which makes this a
+divergence from the tool this project exists to emulate rather than a gap in what
+it can see. **Ticket 15** adopts their rule and now blocks 13 — it moves
+`files_walked` and the detector set version, and a comparison run before it would
+measure our divergence in all three states. The separate dedupe rule GitLab
+applies to governance surfaces is written into tickets 13 and 14.
+
+**46 `REFERENCES` edges point at paths the walk recorded no row for**, and they
+are all these symlinks: `traceability.md` names `full.md`, the pointer resolver
+resolves it, and the walk never made the row. One walk and one resolver
+disagreeing about what is in the repository, which is the fault
+`surfaces.py:399` names in so many words. It is a side effect of the refusal
+rather than its own defect, so ticket 15 closes it and asserts the zero.
 
 **The honest route to the direction is still a change to the corpus.** A manifest
 declaring input → output is already read, at rung 2, and `build_lineage` now
