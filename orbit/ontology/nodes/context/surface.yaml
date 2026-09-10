@@ -108,7 +108,10 @@ properties:
     description: "SHA-256 of the file's bytes as indexed. Retrieval compares the
       file against this before slicing: byte offsets recorded against one
       version of a file are meaningless against another, and returning whatever
-      now sits at those offsets is silently wrong rather than merely stale."
+      now sits at those offsets is silently misread rather than merely stale.
+      Empty on a row whose reason is non_regular_file: a symlink is listed as a
+      node and never opened, so it has no bytes of its own to hash, and hashing
+      through the link would file the named file's digest under a second path."
 
   size_bytes:
     type: int64
@@ -181,7 +184,7 @@ properties:
     source: reason
     nullable: false
     mutable: true
-    description: "Why the surface was skipped or failed to index (e.g. invalid_utf8, oversize, read_error, non-regular-file). Empty for surfaces indexed successfully. A non-regular-file row is a symlink: it carries the link's own size, no content_sha256 and no clauses, because a symlink is listed as a node and never read."
+    description: "Why the surface was skipped or failed to index (e.g. invalid_utf8, oversize, read_error, non_regular_file). Empty for surfaces indexed successfully. A non_regular_file row is a symlink: it carries the link's own size, no content_sha256 and no clauses, because a symlink is listed as a node and never read."
     selectivity: low
 
 storage:

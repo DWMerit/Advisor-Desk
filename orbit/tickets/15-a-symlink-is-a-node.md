@@ -153,6 +153,7 @@ every count taken against a contaminated store is arguable until it is not.
 - [x] A symlink's recorded size is the link's own, not its target's
 - [x] The reason is `non-regular-file`, and the ticket's quotation of
       `indexer/code.rs:152` is what it was taken from
+      — **taken in their spelling, `non_regular_file`; see the decisions below**
 - [x] The corpus share counts only files that were read, and a test builds a
       directory where the unread files would sink it below the threshold
 - [x] `surfaces` is still 87 on this repository, reconciled by name against
@@ -164,7 +165,7 @@ every count taken against a contaminated store is arguable until it is not.
 ## The acceptance run
 
 Advisor-Desk, branch head. **Detector set `1.8516f0a599c4` before,
-`1.1c9494f7857c` after** — the version moved on its own, off the new reason
+`1.8eabab386316` after** — the version moved on its own, off the new reason
 constant and the corpus rule's new input, which is the mechanism working.
 
 The walk is the figure this ticket moves, so it is reported as a set difference
@@ -176,8 +177,8 @@ added   14: _rule-workbench/<book>/full.md, one per book
 removed  0
 ```
 
-The fourteen, in full, each listed and never read, each 32 bytes of link rather
-than the 17,866 of the book it names:
+The fourteen, in full, each listed and never read, each 30–104 bytes of link
+rather than the 17,866 of the book it names:
 
 ```
 _rule-workbench/a-philosophy-of-software-design/full.md
@@ -196,14 +197,23 @@ _rule-workbench/the-pragmatic-programmer/full.md
 _rule-workbench/working-effectively-with-legacy-code/full.md
 ```
 
-They carry no vendor name, so none of them is a candidate and none becomes a
-row. Their reason is reported where a file that was walked and not hashed is
-reported:
+Each is a row in `gl_context_surface` and a row in `gl_context_coverage`,
+carrying `non_regular_file`, an empty `content_sha256` and the link's own size —
+recorded the way every other unread candidate's reason is recorded. `repo-map`
+reads them back:
+
+```
+  files walked   320
+  read in part   14
+                   14  non_regular_file
+```
+
+and the reasons are counted where a walked file that was not hashed is counted:
 
 ```json
 "files_hashed": 306,
 "files_not_read": 14,
-"files_not_read_by_reason": {"non-regular-file": 14, "oversize": 0,
+"files_not_read_by_reason": {"non_regular_file": 14, "oversize": 0,
                              "read_error": 0}
 ```
 
@@ -211,31 +221,68 @@ Everything the ticket said must not move, did not:
 
 | | before | after | expected |
 |---|---|---|---|
-| surfaces | 103 | **103** | unchanged |
+| surfaces read in full | 103 | **103** | unchanged |
 | recognition | 16 / 84 / 3 | **16 / 84 / 3** | unchanged |
 | corpus-adjacent | 3 | **3** | 3 — the trap, not sprung |
 | identical-bytes pairs | 28 | **28** | 28 — never loaded, never hashed |
 | ladders / rungs | 14 / 42 | **14 / 42** | 14 / 42 |
-| `REFERENCES` edges landing on a path the walk did not find | 46 | **0** | 0 |
+| `REFERENCES` edges landing on a path with no row | 46 | **0** | 0 |
 | errored files | 0 | **0** | 0 |
 
-**Reconciled against `08`'s hand count by name, not re-derived.** 103 surfaces
-rather than the ticket's 87 because the branch head carries `orbit/` and
-`.claude/` on top of the 201 files `08` counts; the 87 that came from those 201
-are the same 87, and the fourteen links are the same fourteen `08` lists. The
-`files_hashed` figure is 306 rather than the 304 of the run before this one
-because this ticket added two files of its own — `orbit/fixtures/build_symlinks.py`
-and `orbit/tests/test_symlinks.py`. Neither is Markdown, so neither is a
-surface, a pair or a rung, so every row of the table above except the walk
-itself is comparable as it stands.
+Two figures did move, and both are the fourteen: `files carrying a surface kind`
+103 → 117, and `skipped_files` 0 → 14. Neither is a surface that was read.
 
-**The 46 edges are still 46 edges.** They now land on paths the walk found, which
-is the fix: one walk and one resolver giving one answer to "what is in this
+**Reconciled against `08`'s hand count by name, not re-derived.** 103 rather than
+the ticket's 87 because the branch head carries `orbit/` and `.claude/` on top of
+the 201 files `08` counts. The reconciliation is by path set, not by total: the
+paths carrying a row that indexed are the same set before and after, added to 0
+and removed 0, so the 87 that came from those 201 are the same 87 file for file.
+The fourteen links are the same fourteen `08` lists. The `files_hashed` figure is
+306 rather than the 304 of the run before this one because this ticket added two
+files of its own — `orbit/fixtures/build_symlinks.py` and
+`orbit/tests/test_symlinks.py`. Neither is Markdown, so neither is a surface, a
+pair or a rung, and every row of the table above except the walk itself is
+comparable as it stands.
+
+**The 46 edges are still 46 edges.** They now land on `Surface` rows, which is
+the fix: one walk and one resolver giving one answer to "what is in this
 repository". Nothing was dropped to reach zero.
 
-**Two names for one file still count as two nodes.** GitLab's dedupe
-(`crates/orbit-local/src/commands/setup.rs:265-271`) is written into 13 and 14,
-where two states can disagree about it, and is deliberately not here.
+**The suite is not green, and the red test is not this ticket's.**
+`test_pointers.py`'s `test_unmatched_addresses_stay_in_the_tens` reads 119
+against a ceiling of 100. It read 119 at `f70fbcb` too, before any of this: the
+two commits that installed the `/implement` and `/tdd` skills brought 25
+unmatched addresses with them, this ticket's own prose 3, and without
+`.claude/skills/**` the figure is 94. It measures a property of the repository
+to make a statement about a detector, which is the shape `08`'s own rule warns
+about — recorded here rather than re-baselined, because the ceiling is a bar this
+project set deliberately.
+
+## Decisions taken against the ticket's own words
+
+**The reason is spelled `non_regular_file`, not `non-regular-file`.** The ticket
+asked for their word in our kebab-case. Taken in their spelling instead, on the
+ticket's own closing rule: this is a faithfulness fix, and where their answer and
+a nicer answer differ, theirs wins. It also keeps one separator across the
+`reason` column, beside `invalid_utf8`, `oversize`, `read_error` and
+`not_a_file`.
+
+**A link inside a corpus is recognised with the rest of that directory.** Do-item
+5 says to keep it out of the *denominator*, and that is all it says. The share
+that decides whether a directory is a corpus counts only files that were read;
+the corpus it then recognises reaches a link like any other Markdown file in it,
+which is what makes the fourteen rows rather than an aggregate count. Built the
+other way first — a link recognised by nothing — and the demo line and the
+`REFERENCES` acceptance box were both only satisfiable by redefining "row".
+
+**`repo-map`'s recognition split now counts rows that were read.** It is what the
+line above changed and the one edit this ticket makes outside its own area. The
+split exists to separate what the estate stated about a file from what this tool
+read off the directory around it, and a file nobody opened is evidence of
+neither. Left alone it would have reported `corpus-adjacent 17` on this
+repository — fourteen inferences about files whose bytes nothing has seen,
+against three real ones. It now sums to `surfaces read in full` rather than to
+`files carrying a surface kind`, and the block says which.
 
 **Containment is not implemented, and the disagreement is recorded rather than
 resolved.** `crates/utils/src/fs.rs:23-34` canonicalises a link's target and
@@ -244,12 +291,15 @@ row is the link's own name and the link's own size — so there is nothing here 
 containment to guard. It becomes real the day something follows a link, and that
 day is not this ticket.
 
-**One spelling is ours, not theirs.** Their metric label is `non_regular_file`
-and this ticket asked for `non-regular-file`, their word in our kebab-case. It is
-written that way. It is the only value in the `reason` column that is not
-snake_case — `invalid_utf8`, `oversize`, `read_error`, `not_a_file` — so a query
-against that column now has to know which separator each value uses. Recorded
-here as a divergence rather than quietly corrected in either direction.
+**Two names for one file still count as two nodes.** GitLab's dedupe
+(`crates/orbit-local/src/commands/setup.rs:265-271`) is written into 13 and 14,
+where two states can disagree about it, and is deliberately not here.
+
+**A link wearing a pruned name is refused by the name.** Every link was refused
+before this ticket, `node_modules` among them; listing one now would carry
+another estate's surfaces in through a name this walk has always refused. The
+name is checked before anything asks what the entry is, because telling a link to
+a directory from a link to a file means following it.
 
 ## Watch for
 

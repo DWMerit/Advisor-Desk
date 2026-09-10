@@ -38,9 +38,20 @@ the corpus trap
     vendor name makes it a row whatever it is, and the rung rule reads two
     filenames. Both ends of a ladder have to be files that were read.
 
+``.claude/commands/audit.md``
+    The other way round: a real rung word beside a **base rung** that is a
+    link. The estate did write that rung and this tool cannot attach it, which
+    is a different fact from the case above and is counted as one.
+
 ``mirror``
     A link to a directory. Listed once, never descended into: descending would
     walk one tree twice and count one file as two.
+
+``node_modules``
+    A link wearing a pruned name. Those names are refused by name, before
+    anything asks what the entry is: a link named `node_modules` names a tree
+    whose surfaces belong to another estate whether or not it is a directory,
+    and telling which would mean following it.
 
 ``docs/missing.md``
     A link whose target is not there. Nothing about listing a link needs its
@@ -103,6 +114,9 @@ PUBLISHED = {
 
 BOOKS = ("refactoring", "clean-code", "release-it", "code-complete")
 
+# The one link the walk refuses, and it refuses it by its name.
+PRUNED_LINK = "node_modules"
+
 # Links, as `link path -> target`, the target written the way the estate writes
 # it: relative to the directory the link sits in.
 LINKS = {
@@ -115,8 +129,13 @@ LINKS = {
     # A rung word on a link that a vendor name reaches, so it is a row -- and
     # still not a rung, because a rung is one of two files holding one book.
     ".claude/agents/reviewer.mini.md": "reviewer.md",
+    # And the base rung of a real rung word, as a link. `audit.mini.md` is a
+    # rung the estate wrote; its base is a node nothing read.
+    ".claude/commands/audit.md": "../../docs/USAGE.md",
     # A link to a directory, and a link to nothing.
     "mirror": "refactoring",
+    # A link wearing a pruned name. Refused by the name, not by what it is.
+    PRUNED_LINK: "refactoring",
     "docs/missing.md": "../nowhere.md",
 }
 
@@ -231,6 +250,8 @@ def build(destination: str | Path | None = None) -> Path:
     _write(workbench / "AGENTS.md", ROOT_INSTRUCTIONS)
     _write(workbench / "docs" / "USAGE.md", DOCS)
     _write(workbench / ".claude" / "agents" / "reviewer.md", AGENT_DEFINITION)
+    _write(workbench / ".claude" / "commands" / "audit.mini.md",
+           _prose("Audit", "Read the rung the workflow can afford."))
 
     for relative, target in LINKS.items():
         _link(workbench / relative, target)

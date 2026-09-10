@@ -365,12 +365,19 @@ def _rung_edges(edge: EdgeType, repo: Repository,
     repository does not hold. It is returned instead, so that a rung the estate
     wrote and this tool could not attach does not read as a rung never written.
 
-    ``listed`` is the paths this run recorded as nodes without reading them.
-    A vendor name reaches a symlink -- `.claude/agents/reviewer.mini.md` beside
+    ``listed`` is the paths this run recorded as nodes without reading them. A
+    vendor name reaches a symlink -- `.claude/agents/reviewer.mini.md` beside
     `reviewer.md` is a row and a rung word -- and a link is neither end of a
     ladder: the rung words say two files hold one book at two sizes, and a link
-    is one file wearing a second name. It is not a rung this tool could not
-    attach either, so it is left out of both figures rather than counted as one.
+    is one file wearing a second name.
+
+    The two ends are left out differently, because they are different facts:
+
+    - a link **carrying** a rung word is not a rung the estate wrote, so it is
+      not counted as one this tool could not attach either. It is skipped.
+    - a rung whose **base rung** is a link is a rung the estate did write, and
+      this tool could not attach it. That is what ``rungs_with_no_base_rung``
+      counts, and it is counted there.
     """
     rows: list[dict] = []
     without_a_base: list[str] = []
@@ -612,6 +619,11 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     # was written in, the pointers themselves, and the clause spans to attribute
     # them to.
     pending: list[tuple[dict, str, tuple, list]] = []
+    # The paths this run recorded as nodes without opening them, taken from the
+    # walk's own answer as it arrives rather than read back off the row. A link
+    # is pointed at like any other node; what it is never is one end of a
+    # relation read out of two files' names or two files' bytes.
+    listed: set[str] = set()
 
     # One walk. A surface is one of these files that also carries a name or a
     # location this indexer recognises; every file is hashed, whether it is a
@@ -626,6 +638,8 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
             if row["id"] in rows:
                 continue
             rows[row["id"]] = row
+            if one.non_regular:
+                listed.add(one.relative_path)
             _count(result, one.relative_path, one.reason, one.detail, one.errored)
             # Segmented from the row that *is* the file. A hook-target row at
             # the same path is the same bytes seen from another angle, and
@@ -644,11 +658,6 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
             _count(result, note.relative_path, note.reason, note.detail, note.errored)
 
     whole_file = _whole_file_surfaces(rows)
-    # The paths this run listed without opening. A link is a node like any
-    # other and is pointed at like any other; what it is never is one end of a
-    # relation read out of two files' contents or two files' rung words.
-    listed = {row["path"] for row in rows.values()
-              if row["reason"] == surfaces.REASON_NON_REGULAR_FILE}
     rung_rows, rungs_without_a_base = _rung_edges(rung_of, repo, whole_file, listed)
     edge_rows.extend(rung_rows)
     external_rows: dict[int, dict] = {}

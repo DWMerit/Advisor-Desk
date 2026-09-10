@@ -95,7 +95,7 @@ properties:
     source: reason
     nullable: false
     mutable: false
-    description: "Why the file did not index fully: invalid_utf8, oversize, read_error, not_a_file, non-regular-file, invalid_json, or frontmatter_declaration_absent. Each names a condition of the file or a limit of this tool, never a defect: frontmatter_declaration_absent says a file in a skills directory does not declare the two fields a skill package declares, which is a statement about what was read and not about what the file ought to be. non-regular-file is a symlink, which is listed as a node and never read -- GitLab Orbit's own rule and their word for it, recorded at crates/orbit-observability/src/indexer/code.rs:152 as \"a symlink -- a node, never parsed\"."
+    description: "Why the file did not index fully: invalid_utf8, oversize, read_error, not_a_file, non_regular_file, invalid_json, or frontmatter_declaration_absent. Each names a condition of the file or a limit of this tool, never a defect: frontmatter_declaration_absent says a file in a skills directory does not declare the two fields a skill package declares, which is a statement about what was read and not about what the file ought to be. non_regular_file is a symlink, which is listed as a node and never read -- GitLab Orbit's own rule and their word for it, recorded at crates/orbit-observability/src/indexer/code.rs:152 as \"a symlink -- a node, never parsed\"."
     selectivity: low
 
   detail:

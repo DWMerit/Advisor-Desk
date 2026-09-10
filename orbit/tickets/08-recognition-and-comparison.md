@@ -76,9 +76,9 @@ Advisor-Desk at `main`: **201 files, 198 of them markdown.**
 | `README.md`, `CHANGELOG.md`, `LICENSE`, `.gitignore`, one `.png` | 5 |
 | `_rule-workbench/<book>/full.md` symlinks | 14 |
 
-The fourteen symlinks were written down as *never walked*. Ticket 15 changes that
+The fourteen symlinks were written down as *never walked*. Ticket 15 changed that
 sentence, not the count: they are walked, listed as nodes and never read, which is
-what GitLab Orbit does with a symlink. The 201 total does not move.
+what GitLab Orbit does with a symlink. The 201 total did not move.
 
 Two figures corrected by ticket 10, which reconciled against this table rather
 than counting again: published rule files were written down as 43 and are 42 —

@@ -361,11 +361,20 @@ _SURFACE_SQL = (
 RECOGNITION_NOT_RECORDED = "not-recorded"
 
 # Distinct files, not rows: a settings file holding four hooks was recognised
-# once, and counting its rows would report one vendor name four times. This is
-# the figure `files carrying a surface kind` above it counts, so the two add up.
+# once, and counting its rows would report one vendor name four times.
+#
+# **Rows that were read, not every row.** The split exists to separate what the
+# estate stated about a file from what this tool read off the directory around
+# it, and a file nobody opened is evidence of neither. A symlink is listed as a
+# node and never read (`surfaces.REASON_NON_REGULAR_FILE`), so counting one
+# under `corpus-adjacent` would report an inference about a file whose bytes
+# nothing has seen -- on this repository, fourteen of them against three real
+# ones. So this sums to `surfaces read in full` rather than to `files carrying
+# a surface kind`, and the two figures above name which is which.
 _RECOGNITION_SQL = (
     "SELECT recognition, count(DISTINCT path) "
-    f"FROM gl_context_surface WHERE {_SNAPSHOT} GROUP BY 1"
+    f"FROM gl_context_surface WHERE COALESCE(reason, '') = '' AND {_SNAPSHOT} "
+    "GROUP BY 1"
 )
 
 # A candidate that could not be read still becomes a row carrying its reason, so
@@ -492,7 +501,7 @@ def _coverage(result: RepoMap) -> list[str]:
         "  Every count below is of what this detector set looks for. A low count",
         "  is a statement about these detectors, not a description of the estate.",
         "",
-        "  recognised by",
+        f"  recognised by, of the {result.surfaces_read_in_full} read in full",
         *_rows(list(result.recognition_by_kind.items()), indent="    "),
         f"  of which read off a directory rather than stated by the estate:"
         f" {result.inferred_recognitions}",

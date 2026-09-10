@@ -516,7 +516,7 @@ evidence and the count carrying none:
   "producer_named_no_indexed_target_match": 0,
   "files_hashed": 254,
   "files_not_read": 14,
-  "files_not_read_by_reason": {"non-regular-file": 14, "oversize": 0,
+  "files_not_read_by_reason": {"non_regular_file": 14, "oversize": 0,
                                "read_error": 0},
   "zero_byte_files_not_paired": 1
 }
@@ -642,7 +642,7 @@ Every candidate becomes a row, including ones that could not be read. The
 | `oversize` | Larger than 5 MiB. |
 | `read_error` | The filesystem refused the read. |
 | `not_a_file` | The path is not a regular file. |
-| `non-regular-file` | A symlink. Listed as a node, never read. |
+| `non_regular_file` | A symlink. Listed as a node, never read. |
 
 ### A symlink is a node, never read
 
@@ -660,22 +660,29 @@ never parsed".
 So, here:
 
 - The walk lists it, and does not descend into a link to a directory: that would
-  walk one tree twice and count one file as two.
+  walk one tree twice and count one file as two. A link wearing a pruned name is
+  refused by the name, before anything asks what it is.
 - **No bytes are loaded** — not for a first heading, not for a clause, not for a
   hash. It follows that a link is in no byte-identical pair and on no ladder.
 - Its `size_bytes` is the link's own. On this repository
   `_rule-workbench/<book>/full.md` is 32 bytes, not the 17,866 of the book it
   names.
-- A link carrying a **vendor name** is still a candidate — a name is readable
-  without opening the file — and becomes a row carrying `non-regular-file`, the
-  way an oversize surface carries `oversize`.
-- **The corpus share counts only files that were read.** A node the walk listed
-  without loading cannot declare itself, so it must not count against the files
-  that did. Without that rule, listing this repository's fourteen `full.md`
-  links takes `_rule-workbench` from 42 of 45 declared to 42 of 59 — under the
-  75% share — and the three files that only the share recognises stop being
-  surfaces, with nothing in the output saying a symlink rule caused it. It
-  follows that a link is never recognised *by* a corpus either.
+- Two of the three recognition rules still reach it. A **vendor name** is
+  readable without opening the file, and so is the **corpus** a directory's read
+  files made; only "the file says so" needs the bytes, and a node nobody opened
+  declared nothing. Where one of the two reaches it, the link becomes a row
+  carrying `non_regular_file`, the way an oversize surface carries `oversize`.
+- **The corpus share counts only files that were read** — a narrower statement
+  than the set that share is then applied to. A node the walk listed without
+  loading cannot declare itself, so it must not count against the files that
+  did. Without that rule, counting this repository's fourteen `full.md` links
+  takes `_rule-workbench` from 42 of 45 declared to 42 of 59 — under the 75%
+  share — and the three files that only the share recognises stop being
+  surfaces, with nothing in the output saying a symlink rule caused it.
+- **`repo-map`'s recognition split counts rows that were read.** The split
+  separates what the estate stated about a file from what this tool read off the
+  directory around it, and a file nobody opened is evidence of neither. So it
+  sums to `surfaces read in full`, not to `files carrying a surface kind`.
 
 Two names for one file still count as two nodes here. Folding them to one,
 labelled by the target (`crates/orbit-local/src/commands/setup.rs:265-271`), is

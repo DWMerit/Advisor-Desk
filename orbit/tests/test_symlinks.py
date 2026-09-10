@@ -20,12 +20,12 @@ from pathlib import Path
 
 from . import support
 
-from build_symlinks import BOOKS, LINKS, PUBLISHED, build
-from orbit_context import provenance, surfaces
+from build_symlinks import BOOKS, LINKS, PRUNED_LINK, build
+from orbit_context import provenance, repomap, surfaces
 from orbit_context.indexer import index
 
 # Every link the fixture writes, as a repository-relative path.
-LINKED_PATHS = frozenset(LINKS)
+LINKED_PATHS = frozenset(LINKS) - {PRUNED_LINK}
 
 # The four the estate exposes under a working name, which is the shape this
 # ticket was found on: `_rule-workbench/<book>/full.md`, fourteen times on the
@@ -43,29 +43,79 @@ def _query(db_path: Path, sql: str) -> list[tuple]:
         connection.close()
 
 
-class TestASymlinkIsANode(unittest.TestCase):
-    """Seam A: build the estate, index it, assert on the stats and the rows."""
+def _in(paths) -> str:
+    """A SQL ``IN`` list, written out rather than rendered from a tuple.
 
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-symlinks-"))
-        cls.estate = build(cls.tmp / "estate")
-        cls.root = cls.estate / "workbench"
-        cls.db = cls.tmp / "graph.duckdb"
-        cls.stats = index(cls.estate, db_path=cls.db)
-        cls.repo = cls.stats["repositories"][0]
-        cls.walked = {
-            walked.relative_path for walked in surfaces.walk_files(cls.root)
-        }
+    `tuple(...)` of one element renders `('x',)`, which is not SQL. These sets
+    are the fixture's, so today they hold nine and four; a fixture edit that
+    took one of them to a single path would otherwise fail as a syntax error
+    somewhere else entirely.
+    """
+    return "(" + ", ".join(f"'{path}'" for path in sorted(paths)) + ")"
 
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.tmp, ignore_errors=True)
 
+# Seam A, run once for the whole module: build the estate, index it, and let
+# every class below ask its own question of that one run. Per-class would be
+# three runs that then have to be argued to be the same one.
+_RUN: dict = {}
+
+
+def setUpModule():
+    tmp = Path(tempfile.mkdtemp(prefix="orbit-context-symlinks-"))
+    estate = build(tmp / "estate")
+    root = estate / "workbench"
+    db = tmp / "graph.duckdb"
+    stats = index(estate, db_path=db)
+    _RUN.update(
+        tmp=tmp,
+        root=root,
+        db=db,
+        stats=stats,
+        repo=stats["repositories"][0],
+        walked={walked.relative_path for walked in surfaces.walk_files(root)},
+    )
+
+
+def tearDownModule():
+    shutil.rmtree(_RUN["tmp"], ignore_errors=True)
+
+
+class IndexedEstate(unittest.TestCase):
+    """The one index run, named the way a class attribute would be."""
+
+    @property
+    def root(self) -> Path:
+        return _RUN["root"]
+
+    @property
+    def db(self) -> Path:
+        return _RUN["db"]
+
+    @property
+    def repo(self) -> dict:
+        return _RUN["repo"]
+
+    @property
+    def walked(self) -> set:
+        return _RUN["walked"]
+
+
+class TestASymlinkIsANode(IndexedEstate):
     def test_a_symlink_is_walked(self):
-        """24 files and 9 links. The links are the whole of the difference."""
-        self.assertEqual(self.repo["coverage"]["files_walked"], 33)
+        """25 files and 10 links. The links are the whole of the difference."""
+        self.assertEqual(self.repo["coverage"]["files_walked"], 35)
         self.assertLessEqual(LINKED_PATHS, self.walked)
+
+    def test_a_link_wearing_a_pruned_name_is_refused_by_the_name(self):
+        """Before this ticket every link was refused, so a link named
+        `node_modules` was too. Listing it now would carry another estate's
+        surfaces in through a name this walk has always refused.
+        """
+        self.assertIn(PRUNED_LINK, LINKS)
+        self.assertNotIn(PRUNED_LINK, self.walked)
+        self.assertEqual(
+            [path for path in self.walked if path.startswith(f"{PRUNED_LINK}/")], []
+        )
 
     def test_a_link_to_a_directory_is_listed_once_and_never_descended(self):
         """Descending would walk one tree twice and count one file as two."""
@@ -123,7 +173,7 @@ class TestASymlinkIsANode(unittest.TestCase):
             _query(
                 self.db,
                 "SELECT count(*) FROM gl_context_clause "
-                f"WHERE surface_path IN {tuple(sorted(LINKED_PATHS))}",
+                f"WHERE surface_path IN {_in(LINKED_PATHS)}",
             ),
             [(0,)],
         )
@@ -135,7 +185,7 @@ class TestASymlinkIsANode(unittest.TestCase):
                 self.db,
                 "SELECT count(*) FROM gl_context_surface "
                 "WHERE COALESCE(content_sha256, '') <> '' "
-                f"AND path IN {tuple(sorted(LINKED_PATHS))}",
+                f"AND path IN {_in(LINKED_PATHS)}",
             ),
             [(0,)],
         )
@@ -173,7 +223,6 @@ class TestASymlinkIsANode(unittest.TestCase):
         """
         self.assertEqual(self.repo["graph"]["ladders"]["found"], 1)
         self.assertEqual(self.repo["graph"]["ladders"]["rungs"], 3)
-        self.assertEqual(self.repo["graph"]["ladders"]["rungs_with_no_base_rung"], 0)
         rungs = _query(
             self.db,
             "SELECT source_path FROM gl_context_edge "
@@ -181,9 +230,19 @@ class TestASymlinkIsANode(unittest.TestCase):
         )
         self.assertEqual({path for (path,) in rungs} & LINKED_PATHS, set())
 
+    def test_a_rung_whose_base_rung_is_a_link_is_counted_as_unattached(self):
+        """The other half of the rule, and a different fact from the first.
+
+        `.claude/commands/audit.mini.md` is a rung word the estate wrote, in a
+        file this run read. Its base rung, `audit.md`, is a link -- a node
+        nothing opened. The rung is real and this tool could not attach it,
+        which is exactly what `rungs_with_no_base_rung` counts.
+        """
+        self.assertEqual(self.repo["graph"]["ladders"]["rungs_with_no_base_rung"], 1)
+
     def test_a_link_is_not_read_and_so_is_not_hashed_for_provenance(self):
         identical = self.repo["graph"]["identical_bytes"]
-        self.assertEqual(identical["files_hashed"], 24)
+        self.assertEqual(identical["files_hashed"], 25)
         self.assertEqual(
             identical["files_not_read_by_reason"],
             {
@@ -195,7 +254,7 @@ class TestASymlinkIsANode(unittest.TestCase):
         self.assertEqual(identical["files_not_read"], len(LINKED_PATHS))
 
 
-class TestTheCorpusShareCountsOnlyFilesThatWereRead(unittest.TestCase):
+class TestTheCorpusShareCountsOnlyFilesThatWereRead(IndexedEstate):
     """The trap, measured rather than argued.
 
     Listing unread nodes into a directory that is a corpus by the share rule
@@ -207,19 +266,6 @@ class TestTheCorpusShareCountsOnlyFilesThatWereRead(unittest.TestCase):
     count against the files that did: a file that was never opened is not
     evidence about the directory either way.
     """
-
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-corpus-"))
-        cls.estate = build(cls.tmp / "estate")
-        cls.root = cls.estate / "workbench"
-        cls.db = cls.tmp / "graph.duckdb"
-        cls.stats = index(cls.estate, db_path=cls.db)
-        cls.repo = cls.stats["repositories"][0]
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def _workbench_markdown(self, linked: bool) -> set[str]:
         prefix = "_rule-workbench/"
@@ -249,7 +295,7 @@ class TestTheCorpusShareCountsOnlyFilesThatWereRead(unittest.TestCase):
             self.db,
             "SELECT path FROM gl_context_surface "
             f"WHERE recognition = '{surfaces.RECOGNITION_CORPUS_ADJACENT}' "
-            "ORDER BY path",
+            "AND COALESCE(reason, '') = '' ORDER BY path",
         )
         self.assertEqual([path for (path,) in found], [
             "_rule-workbench/CHECK_COMPATIBILITY.md",
@@ -260,19 +306,54 @@ class TestTheCorpusShareCountsOnlyFilesThatWereRead(unittest.TestCase):
             self.repo["graph"]["recognition"][surfaces.RECOGNITION_CORPUS_ADJACENT], 3
         )
 
-    def test_a_link_inside_a_corpus_is_not_carried_in_with_it(self):
-        """The corpus rule is this tool's one inference, and it reads a
-        directory. A file it never opened is outside what that reading covers.
+    def test_a_link_inside_a_corpus_is_a_row_that_says_it_was_not_read(self):
+        """A directory is readable without opening the files in it, so the
+        corpus rule reaches a link like anything else and the link becomes a
+        node -- which is what GitLab lists a symlink as. What it does not become
+        is evidence: it is not in the share that made the corpus, and it carries
+        the reason nothing read it.
         """
         rows = _query(
             self.db,
-            "SELECT count(*) FROM gl_context_surface "
-            f"WHERE path IN {tuple(sorted(FULL_LINKS))}",
+            "SELECT recognition, reason FROM gl_context_surface "
+            f"WHERE path IN {_in(FULL_LINKS)}",
         )
-        self.assertEqual(rows, [(0,)])
+        self.assertEqual(len(rows), len(FULL_LINKS))
+        self.assertEqual(
+            set(rows),
+            {(surfaces.RECOGNITION_CORPUS_ADJACENT,
+              surfaces.REASON_NON_REGULAR_FILE)},
+        )
+
+    def test_the_inference_count_is_of_files_that_were_read(self):
+        """`repo-map`'s split separates what the estate stated from what this
+        tool read off a directory. A file nobody opened is evidence of neither,
+        so the four links here do not join the three.
+        """
+        found = repomap.read(self.root, db_path=self.db, environ={})
+        self.assertEqual(
+            found.recognition_by_kind[surfaces.RECOGNITION_CORPUS_ADJACENT], 3
+        )
+        self.assertEqual(found.inferred_recognitions, 3)
+        self.assertEqual(
+            sum(found.recognition_by_kind.values()), found.surfaces_read_in_full
+        )
+        # Seven of the ten links are rows: the four in the corpus, and the three
+        # a vendor name reaches. The other three are links nothing recognised --
+        # `clean-code/clean-code.mini.md` and `docs/missing.md` sit in
+        # directories with too few read Markdown files to be a corpus, and
+        # `mirror` is not Markdown at all. A link is a node when something
+        # recognises the path, on the same three rules as any other file.
+        rows = _query(
+            self.db,
+            "SELECT path FROM gl_context_surface "
+            f"WHERE path IN {_in(LINKED_PATHS)}",
+        )
+        self.assertEqual(len(rows), 7)
+        self.assertEqual(found.surfaces_not_read_in_full, 7)
 
 
-class TestOneWalkAndOneResolverAgree(unittest.TestCase):
+class TestOneWalkAndOneResolverAgree(IndexedEstate):
     """The defect ticket 15 closes as a side effect.
 
     `traceability.md` writes a pointer to `full.md`, the resolver resolves it,
@@ -280,21 +361,6 @@ class TestOneWalkAndOneResolverAgree(unittest.TestCase):
     decided were not there. Two answers to "what is in this repository", which
     is the fault `surfaces.walk_files` exists to prevent.
     """
-
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-resolver-"))
-        cls.estate = build(cls.tmp / "estate")
-        cls.root = cls.estate / "workbench"
-        cls.db = cls.tmp / "graph.duckdb"
-        index(cls.estate, db_path=cls.db)
-        cls.walked = {
-            walked.relative_path for walked in surfaces.walk_files(cls.root)
-        }
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def test_every_reference_that_resolved_landed_on_a_path_the_walk_found(self):
         resolved = _query(
@@ -313,7 +379,7 @@ class TestOneWalkAndOneResolverAgree(unittest.TestCase):
             self.db,
             "SELECT DISTINCT target_path FROM gl_context_edge "
             "WHERE relationship_kind = 'REFERENCES' "
-            f"AND target_path IN {tuple(sorted(FULL_LINKS))}",
+            f"AND target_path IN {_in(FULL_LINKS)}",
         )
         self.assertEqual({path for (path,) in landed}, FULL_LINKS)
 
