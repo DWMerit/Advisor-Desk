@@ -1,6 +1,9 @@
 # 07 — Audit the estate, and both gates
 
-**Blocked by:** 06
+**Blocked by:** 06, and **14** — see `08-recognition-and-comparison.md`.
+This ticket is rewritten by 14 before it runs: the clone lineage first as a
+controlled comparison, the hand-built repositories second as an audit. Both gates
+below keep their rules unchanged.
 **Demo when done:** the estate audit report, plus two recorded gate decisions.
 
 Phase 1's exit run is **simultaneously** the estate audit and the input to both gate decisions. One pass, not three.

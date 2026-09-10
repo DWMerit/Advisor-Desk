@@ -2,7 +2,14 @@
 
 Spec: `orbit/specs/0001-observation-foundation.md`
 
-Seven tickets. Tickets 01–06 are done; the frontier is **07**. Work top to bottom, or take any ticket whose blockers are done.
+Seven tickets. Tickets 01–06 are done.
+
+**07 does not run yet.** Running the indexer against this repository returned
+**0 surfaces from 238 files walked** — recognition is by vendor filename, so a
+repository that is entirely governance matches none of it. An estate audit on that
+indexer returns honest zeros and teaches nothing. Spec 0002 and tickets 09–14
+(`08-recognition-and-comparison.md`) close the gap; ticket 14 re-scopes 07 and hands
+it back runnable. **The frontier is 09.**
 
 | # | Ticket | Blocked by |
 |---|---|---|
@@ -12,7 +19,7 @@ Seven tickets. Tickets 01–06 are done; the frontier is **07**. Work top to bot
 | 04 | Pointers resolve; non-resolution is classified | 02 |
 | 05 | Identical bytes, reported with provenance | 02 |
 | 06 | Governance orientation in one command | 03, 04, 05 |
-| 07 | Audit the estate, and both gates | 06 |
+| 07 | Audit the estate, and both gates | 06, **14** |
 
 **Prefactoring: none.** Greenfield — there is nothing to make easy first.
 
