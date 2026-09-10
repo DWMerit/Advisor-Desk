@@ -161,6 +161,18 @@ CORPUS_MINIMUM_DEPTH = 1
 # the corpus rule's kind of inference rather than this one's, and it would put
 # the workbench's rungs and the published rungs in one count under one word
 # without saying which was read how.
+#
+# **Nothing is lost by that here, and it was measured rather than assumed.** All
+# 28 workbench rungs are byte-identical to their published twins, so each one
+# already reaches its book's ladder in two hops -- IDENTICAL_BYTES to the
+# published rung, then RUNG_OF to the base rung -- carrying the right rung word
+# on arrival. The relation is in the graph; only the label is not.
+#
+# That path holds because the copies are identical, which is a property of this
+# repository rather than of the shape. A repository using this shape *without*
+# identical twins would not have it, and its ladders would come back low. That
+# is the case worth looking at before the rule is widened, and it is C2's --
+# spec 0002 s11 refuses a rule built for a repository nobody has looked at.
 RUNG_WORDS = ("mini", "nano")
 
 # The suffix a rung carries. A ladder is Markdown; a directory of source files

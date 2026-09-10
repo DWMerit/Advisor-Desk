@@ -150,12 +150,41 @@ rule did not widen to everything it could see.
 
 ## Found while doing this, and not fixed here
 
-**Fourteen ladder-shaped groups in this repository are not found.** The
-workbench's `mini.md` / `nano.md` shape is the second naming convention in one
-estate, and its full rung is a symlink the walk never enters. Recorded in
-`surfaces.py` beside the rule, and printed as `found` by every command, rather
-than reached by widening the rule inside a ticket that would then have two
-inferences in one count.
+**Fourteen ladder-shaped groups are not keyed on — and the graph reaches them
+anyway.** The workbench's `mini.md` / `nano.md` shape is the second naming
+convention in one estate, and its full rung is a symlink the walk never enters.
+Widening the rule to reach it means reading a directory rather than a name,
+which is the corpus rule's kind of inference rather than this one's, so it was
+left out.
+
+**What that costs was measured, not assumed, and it is nothing here.** All 28
+workbench rungs are byte-identical to their published twins, so each already
+reaches its book's ladder in two hops, arriving with the right rung word:
+
+```sql
+SELECT i.source_path AS workbench_file, r.target_path AS ladder, r.subtype AS rung
+FROM gl_context_edge i
+JOIN gl_context_edge r
+  ON r.relationship_kind = 'RUNG_OF' AND r.source_path = i.target_path
+ AND r.project_id = i.project_id AND r.branch = i.branch
+ AND r.commit_sha = i.commit_sha
+WHERE i.relationship_kind = 'IDENTICAL_BYTES'
+```
+
+    28 of 28, at 7142ad7. _rule-workbench/refactoring/mini.md
+      -> refactoring/refactoring.mini.md -> refactoring/refactoring.md  (mini)
+
+The relation is in the graph. Only the label is not, and a label is not a
+finding.
+
+**The case that would change the answer is C2's.** The two-hop path holds
+because the copies are identical, which is a property of this repository rather
+than of the shape. A repository using the workbench shape *without* identical
+twins would not have it, and its ladder count would come back low with nothing
+saying why. That is worth looking at when agent-rules-books is attached at
+ticket 14, and not before: spec 0002 s11 refuses a rule built for a repository
+nobody has looked at. Recorded here so it is re-opened on the measurement rather
+than on the shape.
 
 **The detector-version gap ticket 10 recorded still applies here, and this
 ticket widened it.** `rung_of()` is logic reading a table: the table moves the
