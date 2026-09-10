@@ -280,7 +280,10 @@ class TestTheCommandLine(unittest.TestCase):
         result = self.run_compare(STATES[0], STATES[1])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("files walked", result.stdout)
-        self.assertIn("governance surfaces", result.stdout)
+        # The row the comparison turns on, anchored to its own line: "surfaces"
+        # alone appears in several headings, so a bare substring would pass on a
+        # table that never printed the row.
+        self.assertRegex(result.stdout, r"(?m)^\s*surfaces\s+\S")
         self.assertIn(".md", result.stdout)
 
     def test_the_exit_code_says_when_the_states_are_not_comparable(self):

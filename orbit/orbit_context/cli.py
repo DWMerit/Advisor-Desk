@@ -3,7 +3,7 @@
 Seven commands. ``index`` writes the graph; ``migrate`` brings an existing store
 to the ontology when the two have parted; ``show`` reads one clause back out of
 the file it came from, at the byte offsets the graph recorded; ``repo-map``
-prints one repository's governance surface, read from the graph, inside a stated
+prints one repository's surfaces, read from the graph, inside a stated
 budget; ``ladder`` walks the ``RUNG_OF`` edges of one book and prints its rungs
 in size order; ``pairs`` prints every byte-identical pair with the direction its
 evidence supports, or an explicit UNKNOWN and the reason there is none;
@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     map_parser = subparsers.add_parser(
         "repo-map",
-        help="Print one repository's governance surface, inside a stated budget",
+        help="Print one repository's surfaces, inside a stated budget",
     )
     map_parser.add_argument(
         "--repo", dest="repo", default=".",

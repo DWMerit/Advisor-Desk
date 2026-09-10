@@ -1,4 +1,4 @@
-"""`repo-map`: one repository's governance surface, from the graph, in a budget.
+"""`repo-map`: one repository's surfaces, from the graph, in a budget.
 
 What is tested here is mostly about what the map refuses to do. It refuses to
 re-walk the tree, so every count is answerable from one snapshot. It refuses to

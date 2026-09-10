@@ -206,6 +206,38 @@ Falsifiable, written now, so the answer is not negotiated after the fact.
 
 Only then does ticket 07 run.
 
+## 10a. The layer boundary
+
+**Orbit is the context layer. Its only job is to show what is.**
+
+Governance and authority are a different layer, disclosed progressively as a
+workflow needs them. They sit above this one and read from it; they are not built
+here and are not named here.
+
+The distinction the two words carry, kept separate because conflating them is
+what pulls an observer toward judging:
+
+- **governance** — which rules exist, and where.
+- **authority** — which rule wins, and who decides.
+
+Orbit answers neither. It answers *what files exist, what they contain, what
+points at what, and what is byte-identical to what*. That a file is loaded by a
+convention is observable. That it governs, or that it outranks another file, is
+not, and no detector may assert it.
+
+**The practical rule.** In anything the tool writes — a printed row, a column
+name, an ontology description, a `--help` string — the noun is `surface`,
+`clause`, `pointer`, `pair`, `rung`. Never `governance`, never `authority`. Those
+words belong in specs and tickets, where a human is explaining intent to another
+human. GitLab Orbit has no such words in its output because it indexes code; a
+faithful emulation has none in its output either.
+
+This was checked and five uses were found and removed: two printed row labels and
+one section subtitle in `compare.py`, one `--help` string in `cli.py`, and two
+ontology descriptions in `references.yaml` that shipped inside the graph itself.
+`authority` appeared nowhere. Module docstrings still use `governance` to explain
+why a module exists, which is prose to a maintainer rather than output.
+
 ## 11. Out of scope — refused, with the reason
 
 - **A SessionStart hook to carry branch state.** Refused during phase 1: *"dont build it if

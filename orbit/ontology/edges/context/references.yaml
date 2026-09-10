@@ -27,10 +27,10 @@ destination_table: gl_context_edge
 variants:
   - from_node: Surface
     to_node: Surface
-    description: A pointer that landed on an indexed governance surface.
+    description: A pointer that landed on an indexed Surface.
   - from_node: Surface
     to_node: File
-    description: A pointer that landed on a file in the tree that is not a governance surface. File is Orbit's own node type, joined by path.
+    description: A pointer that landed on a file in the tree that is not a Surface. File is Orbit's own node type, joined by path.
   - from_node: Surface
     to_node: ExternalRef
     description: A pointer that did not resolve inside the repository root.

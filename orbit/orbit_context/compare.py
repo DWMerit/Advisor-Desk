@@ -40,7 +40,7 @@ to it, and asserts one entry named ``AGENTS.md``.
 
 It matters here because the row this comparison turns on is a zero. Fourteen
 symlinked ``full.md`` files sit in both states of the repository this was built
-for; counted as governance in one state and not in the other, the zero moves and
+for; counted as a surface in one state and not in the other, the zero moves and
 the comparison reports a session adding rules it did not write.
 
 What the fold is *not*: same-inode is a stronger statement than the byte
@@ -223,13 +223,13 @@ class Comparison:
                 self.before.surfaces_folded, self.after.surfaces_folded),
             Row("clauses", self.before.clauses, self.after.clauses),
             Row("pointers", self.before.pointers, self.after.pointers),
-            Row("governance surface bytes",
+            Row("surface bytes",
                 self.before.surface_bytes, self.after.surface_bytes),
         ]
 
     def surfaces(self) -> Row:
-        """The row the comparison turns on: governance, after the fold."""
-        return Row("governance surfaces",
+        """The row the comparison turns on: surfaces, after the fold."""
+        return Row("surfaces",
                    self.before.surface_rows, self.after.surface_rows)
 
     def suffixes(self) -> dict[str, Row]:
@@ -826,7 +826,7 @@ def render(comparison: Comparison) -> str:
         still="every directory that did not move",
     )
     lines += _folds(comparison)
-    lines += _by_name(comparison, "SURFACES BY KIND", "which governance moved",
+    lines += _by_name(comparison, "SURFACES BY KIND", "which kinds moved",
                       comparison.surface_kinds())
     lines += _by_name(comparison, "CLAUSES BY TYPE", "by Markdown structure alone",
                       comparison.clause_types())
