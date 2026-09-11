@@ -18,6 +18,7 @@ here for what it is *reported beside*, not only for being right.
 
 import hashlib
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -433,3 +434,84 @@ class TestThisRepository(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheProducesCountIsACountOfEdges(unittest.TestCase):
+    """`produces_edges` counts what the graph holds, or it counts nothing.
+
+    Found by ticket 07's audit, on Home-system. `index` reported
+    `produces_edges: 2` and the graph held one PRODUCES row, with no field
+    accounting for the difference. The extra one is
+    `.claude/tools/skill-sync/skills.json:80`, which declares
+    `.claude/tools/skill-sync/NOTES.md` as both an input and an output.
+
+    `_produces_edges` refuses to write that edge, and is right to: a file is
+    not its own producer, and an edge from a node to itself orders nothing.
+    The statistic did not refuse it, so the two readings came apart -- and
+    spec 0002 section 9 makes a number that cannot be tied back to named files
+    not a result.
+
+    The fix is the one this module already uses twice. A production the edge
+    rule declines is named in a field of its own, the way a producer named and
+    not found is, so that declining to write an edge does not read as nothing
+    having been declared.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="orbit-context-self-producer-"))
+        root = cls.tmp / "estate" / "one"
+        (root / "tools").mkdir(parents=True)
+        (root / "tools" / "NOTES.md").write_text("# Notes\n\nA record.\n")
+        (root / "tools" / "build.py").write_text("print('x')\n")
+        (root / "tools" / "out.md").write_text("# Out\n\nBuilt.\n")
+        # One manifest, two declarations: one names a file as its own input
+        # and output, one names two different files.
+        (root / "tools" / "manifest.json").write_text(
+            '{\n'
+            '  "self": {"input": "NOTES.md", "output": "NOTES.md"},\n'
+            '  "real": {"input": "build.py", "output": "out.md"}\n'
+            '}\n'
+        )
+        (root / "CLAUDE.md").write_text("# OBEY\n\nA rule.\n")
+        subprocess.run(["git", "init", "--initial-branch", "main"],
+                       cwd=root, check=True, capture_output=True)
+        for key, value in (("user.email", "fixture@example.invalid"),
+                           ("user.name", "Fixture")):
+            subprocess.run(["git", "config", key, value],
+                           cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "fixture"],
+                       cwd=root, check=True, capture_output=True)
+        cls.db = cls.tmp / "graph.duckdb"
+        cls.stats = index(cls.tmp / "estate", db_path=cls.db, detailed=True)
+        cls.block = cls.stats["repositories"][0]["graph"]["identical_bytes"]
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def rows(self):
+        connection = store.connect(self.db, read_only=True)
+        try:
+            return connection.execute(
+                "SELECT source_path, target_path FROM gl_context_edge "
+                "WHERE relationship_kind = 'PRODUCES'"
+            ).fetchall()
+        finally:
+            connection.close()
+
+    def test_no_edge_runs_from_a_file_to_itself(self):
+        self.assertEqual([(source, target) for source, target in self.rows()
+                          if source == target], [])
+
+    def test_the_count_equals_the_rows(self):
+        self.assertEqual(self.block["produces_edges"], len(self.rows()))
+
+    def test_the_evidence_rungs_sum_to_the_count(self):
+        self.assertEqual(sum(self.block["produces_by_evidence"].values()),
+                         self.block["produces_edges"])
+
+    def test_the_declination_is_named_rather_than_dropped(self):
+        # The manifest said something. It is not an edge and it is not nothing.
+        self.assertEqual(self.block["producer_and_artifact_are_one_file"], 1)

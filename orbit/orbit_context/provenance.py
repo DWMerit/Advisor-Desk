@@ -696,11 +696,19 @@ def summary(scan: Scan, matched: list[Pair],
     without_provenance = by_reason[NO_PRODUCER_AT_EITHER_END]
     with_provenance = len(matched) - without_provenance
 
+    # Counted exactly as the edge rule counts, so the statistic and the graph
+    # cannot come apart. Each production the rule declines gets a field of its
+    # own rather than being dropped: a declaration the estate wrote and this
+    # tool could not turn into an edge is not a declaration never written.
     by_evidence = {rung: 0 for rung in EVIDENCE_LADDER}
     unresolved = 0
+    self_naming = 0
     for production in productions:
         if production.producer_path is None:
             unresolved += 1
+            continue
+        if production.producer_path == production.artifact_path:
+            self_naming += 1
             continue
         by_evidence[production.evidence] += 1
     return {
@@ -715,6 +723,7 @@ def summary(scan: Scan, matched: list[Pair],
         "generation_declared_without_producer_named":
             len(scan.declared_without_producer),
         "producer_named_no_indexed_target_match": unresolved,
+        "producer_and_artifact_are_one_file": self_naming,
         "files_hashed": len(scan.contents),
         "files_not_read": len(scan.not_read),
         "files_not_read_by_reason": not_read_by_reason,
