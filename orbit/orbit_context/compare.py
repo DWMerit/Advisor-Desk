@@ -771,6 +771,21 @@ def compare(repo: str | Path, *refs: str,
 # --- Printing it -----------------------------------------------------------
 
 
+def _fold_line(fold: Fold) -> str:
+    """One fold: the name counted, and the file it was counted as.
+
+    Cut through ``pairs.tell_apart`` for the reason that function exists. A
+    link sits beside what it names, so the two paths of a fold share both ends
+    by construction -- the one shape a middle elision collapses. Printed
+    collapsed, the line says a file was counted as itself, and a reader has no
+    way to tell that from a line where it was.
+    """
+    name, counted_as = pairs.tell_apart(
+        fold.name, fold.counted_as, lambda path: _short(path, 40)
+    )
+    return f"      {name} counted as {counted_as}"
+
+
 def _short(text: str, width: int = MAX_TEXT_WIDTH) -> str:
     text = str(text)
     if len(text) <= width:
@@ -993,10 +1008,7 @@ def _folds(comparison: Comparison) -> list[str]:
             f"{state.link_rows} {LINK_ROWS}, {state.link_bytes} bytes, "
             f"{state.surfaces_folded} folded"
         )
-        for fold in state.folds[:EXAMPLE_ROWS]:
-            lines.append(
-                f"      {_short(fold.name, 40)} counted as {_short(fold.counted_as, 40)}"
-            )
+        lines += [_fold_line(fold) for fold in state.folds[:EXAMPLE_ROWS]]
         if len(state.folds) > EXAMPLE_ROWS:
             lines.append(f"      and {len(state.folds) - EXAMPLE_ROWS} more")
     lines.append(

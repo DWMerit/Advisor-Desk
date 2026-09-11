@@ -771,3 +771,67 @@ class TestThisRepository(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTwoDistinctPathsNeverPrintAsOne(unittest.TestCase):
+    """A pair of two different files must not print as one file beside itself.
+
+    Found by ticket 07's audit, in `repo-map` over Estimating-Lab. The pair
+
+        work/sparx-academy-new-ken.transcript/2026-08-20-8bbf42cf/images/4856501b5adc.webp
+        work/sparx-academy-new-ken.transcript/2026-08-20-ea6aa9c3/images/4856501b5adc.webp
+
+    shares a long prefix *and* a long suffix and differs only in the middle,
+    which is exactly the region a middle elision removes. Both ends printed as
+    `work/sparx-academy-ne…ages/4856501b5adc.webp`, so a true finding -- two
+    distinct files hold identical bytes -- reached the page reading as a file
+    identical to itself. Spec 0002 section 9 makes one false assertion a stop,
+    and a reader cannot tell this line from a genuine one.
+
+    The guarantee asserted here is the whole fix: distinct inputs, distinct
+    output, whatever the width and wherever the two diverge.
+    """
+
+    SOURCE = ("work/sparx-academy-new-ken.transcript/2026-08-20-8bbf42cf"
+              "/images/4856501b5adc.webp")
+    TARGET = ("work/sparx-academy-new-ken.transcript/2026-08-20-ea6aa9c3"
+              "/images/4856501b5adc.webp")
+
+    def pairing(self, source, target):
+        return pairs_module.Pairing(
+            source, target, "0" * 64, provenance.DIRECTION_UNKNOWN,
+            reason=provenance.NO_PRODUCER_AT_EITHER_END,
+        )
+
+    def rendered(self, source, target, width=44):
+        line = pairs_module._line(
+            self.pairing(source, target), lambda path: repomap._short(path, width)
+        )
+        left, _, right = line.partition(" = ")
+        return left.strip(), right.split("  ")[0].strip()
+
+    def test_the_pair_the_audit_found_prints_two_different_strings(self):
+        left, right = self.rendered(self.SOURCE, self.TARGET)
+        self.assertNotEqual(left, right)
+
+    def test_what_differs_survives_the_cut(self):
+        left, right = self.rendered(self.SOURCE, self.TARGET)
+        self.assertIn("8bbf42cf", left)
+        self.assertIn("ea6aa9c3", right)
+
+    def test_a_pair_that_already_printed_distinctly_is_left_alone(self):
+        left, right = self.rendered("a/one.md", "a/two.md")
+        self.assertEqual((left, right), ("a/one.md", "a/two.md"))
+
+    def test_two_paths_diverging_late_inside_one_long_segment(self):
+        stem = "w/" + "x" * 200
+        left, right = self.rendered(stem + "a.md", stem + "b.md")
+        self.assertNotEqual(left, right)
+
+    def test_the_guarantee_holds_across_widths_and_divergence_points(self):
+        for width in (12, 20, 44, 64):
+            for cut in (4, 37, 48, 60):
+                source = self.SOURCE[:cut] + "Q" + self.SOURCE[cut + 1:]
+                with self.subTest(width=width, cut=cut):
+                    left, right = self.rendered(source, self.TARGET, width)
+                    self.assertNotEqual(left, right)

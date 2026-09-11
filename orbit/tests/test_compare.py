@@ -45,6 +45,7 @@ from build_states import (
     TOOL, build,
 )
 from orbit_context import compare
+from orbit_context import compare as compare_module
 from orbit_context.cli import main
 
 
@@ -578,3 +579,28 @@ class TestTheCommandLine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAFoldNeverPrintsOneNameTwice(unittest.TestCase):
+    """A fold names two things: the name counted, and what it counted as.
+
+    Same guarantee as `pairs.tell_apart`, on the other listing that prints two
+    paths side by side. A symlink sitting beside its target shares both ends of
+    its path with it by construction, so the fold listing has exactly the shape
+    that collapses under a middle elision -- and a fold printing one name twice
+    says a file was counted as itself, which is not what was found.
+    """
+
+    NAME = "packages/rules/very-long-directory-name/full.md"
+    COUNTED_AS = "packages/rules/very-long-directory-other/full.md"
+
+    def test_the_two_halves_of_a_fold_line_stay_distinct(self):
+        fold = compare_module.Fold(self.NAME, self.COUNTED_AS)
+        line = compare_module._fold_line(fold)
+        left, _, right = line.partition(" counted as ")
+        self.assertNotEqual(left.strip(), right.strip())
+
+    def test_a_fold_that_already_printed_distinctly_is_left_alone(self):
+        fold = compare_module.Fold("a/full.md", "b/book.md")
+        self.assertEqual(compare_module._fold_line(fold),
+                         "      a/full.md counted as b/book.md")

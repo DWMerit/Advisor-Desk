@@ -426,6 +426,52 @@ def summary_lines(counts: PairCounts, listed: list[Pairing],
     return lines
 
 
+def _shared_prefix(left: str, right: str) -> int:
+    """How many leading characters the two paths agree on."""
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return index
+
+
+def _after(path: str, start: int) -> str:
+    """The path from ``start`` on, with what was dropped marked."""
+    return "…" + path[start:] if start else path
+
+
+def tell_apart(source: str, target: str, cut) -> tuple[str, str]:
+    """Two paths cut to a printable width, and still two.
+
+    A pair is two files. Cut so that both ends print as the same string, the
+    line reads as one file identical to itself -- a true finding arriving as a
+    false one, which spec 0002 section 9 makes a stop rather than a blemish.
+
+    The caller's cut elides the middle, because for most pairs the two ends are
+    what tell paths apart. This pair does not have that shape:
+
+        work/…/2026-08-20-8bbf42cf/images/4856501b5adc.webp
+        work/…/2026-08-20-ea6aa9c3/images/4856501b5adc.webp
+
+    -- one directory of captures, one file name reused inside each, so the two
+    agree at both ends and differ only where a middle elision cuts. Where that
+    happens the shared prefix is elided instead, which moves what differs to
+    the front, where every cut keeps it. The segment boundary is tried first so
+    the remaining text starts at a path segment and stays readable; the exact
+    point of divergence is the fallback, and it is what makes the guarantee
+    hold rather than usually hold.
+    """
+    left, right = cut(source), cut(target)
+    if left != right or source == target:
+        return left, right
+    shared = _shared_prefix(source, target)
+    for start in (source.rfind("/", 0, shared) + 1, shared):
+        left, right = cut(_after(source, start)), cut(_after(target, start))
+        if left != right:
+            break
+    return left, right
+
+
 def _line(one: Pairing, shorten=None) -> str:
     """One pair, and what is known about which end came first.
 
@@ -434,7 +480,7 @@ def _line(one: Pairing, shorten=None) -> str:
     told "source-produces-target" makes them work out which is which.
     """
     cut = shorten or (lambda path: path)
-    pair = f"{cut(one.source_path)} = {cut(one.target_path)}"
+    pair = " = ".join(tell_apart(one.source_path, one.target_path, cut))
     if not one.measured:
         return f"{pair}  {NOT_MEASURED}"
     if not one.ordered:
