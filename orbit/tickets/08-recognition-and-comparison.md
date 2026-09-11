@@ -139,8 +139,15 @@ All of `00-phase-1.md` still applies — the vocabulary constraint, no prose
 columns, ontology YAML before Python, tests ship with the ticket, never open
 GitLab Orbit's file for writing. Added for this batch:
 
-- **On resuming after a clear or a restart, run `repo-map` before describing
-  state.** Branch, commits ahead, and which of them carry this session's
+- **On resuming after a clear or a restart, index and then run `repo-map`
+  before describing state.** Both commands, in that order: `repo-map` refuses a
+  commit it has no index run for, naming the remedy, so on a fresh head it
+  reports nothing until `orbit-context index` has been run. That refusal is
+  correct — it will not describe a snapshot that is not the current commit — but
+  a rule that names only the second command fails at the moment it is most
+  needed. It has already done so once, on the session that wrote it.
+
+  Branch, commits ahead, and which of them carry this session's
   `Claude-Session` trailer are read off disk, not recalled. A context window is
   not a record of what was done: work committed and pushed fifteen minutes
   earlier has already been described in this project as having "no record",
