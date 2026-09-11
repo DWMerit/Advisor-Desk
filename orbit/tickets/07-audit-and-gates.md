@@ -472,8 +472,9 @@ There is none, in any of the six tables.
 
 ### Q2 — of the bytes that reach a session, which are paid for twice?
 
-**Half answerable.** Which content exists twice is fully answerable and every
-instance is named:
+**Not answerable**, as the question is put — and half of it is, with the half
+that is not being the half the question turns on. Which content exists twice is
+fully answerable and every instance is named:
 
 ```sql
 SELECT r.path, count(*) FROM gl_context_edge e
@@ -494,7 +495,7 @@ says.
 
 ### Q3 — which surfaces can a session stop paying for, and which are unconditional?
 
-**Not answerable, and the missing thing is not the same one.**
+**Not answerable.**
 
 No column carries it — `activation`, `trigger`, `lifetime`, `revocable`, `scope`
 and `inheritance` all return a binder error. What phase 1 does carry is the
@@ -519,35 +520,64 @@ field that governs exactly this question. Two things stop that being an answer:
   for them would be filled by inference, and spec 0002 §5 forbids recording
   inference as fact.
 
-### The decision: not built
+### The decision: the gate opens, and it opens for `client` alone
 
-The gate's two branches are "all three answer → not built" and "they do not, and
-the same column is missing each time → build only that column". Neither fires
-cleanly, so the reasoning is set out rather than asserted.
+All three questions are marked **not answerable**. Branch one — *all three
+answer → not built* — does not fire.
 
-Q1 and Q2 miss the same thing: which client pays for a surface. Q3 misses
-something else, and most of what Q3 misses cannot be observed at all.
+Branch two is *they do not, and the same column is missing each time → build
+only that column*. **The same thing is missing each time, and it is which
+client pays for a surface.**
 
-**So the one surviving candidate is `client`, and it does not earn a column.**
-Where a vendor filename names the client, `path` already carries it — that is
-how the query above answered for 81 rows, and it is the same evidence
-`recognition = 'vendor-name'` already records. Where no filename names it, for
-the 237 rows that are two-thirds of the estate's surface bytes, there is no
-static evidence to read: which client pays for `_rule-workbench/refactoring/mini.md`
-is not written in that file, in any file pointing at it, or anywhere in the
-tree. A `client` column would hold values derivable from a column already
-present, or UNKNOWN.
+- **Q1** misses it outright: 237 of 318 surface rows carry no filename that
+  names one.
+- **Q2** misses it as the thing its answerable half waits on. Which content
+  exists twice is fully in the graph; whether a session pays for it twice needs
+  to know which of the two ends a client loads.
+- **Q3** misses it too, and this is the reading to be careful with, because it
+  is the one that decides the branch. Q3 misses `activation` as well. But
+  "unconditional" is not a property of a file — it is a property of a file
+  *for a client*. A `SKILL.md` under `.claude/` reaches a Claude session as
+  frontmatter at open and a body on invocation; that rule is the client's, not
+  the file's, and a repository holding one file for two clients has two
+  answers. `client` is necessary for Q3 as well, and not sufficient.
 
-**A column whose every non-UNKNOWN value is derivable from a column already on
-the row is not a column.** Gate A closes.
+**Build `client`. Only `client`.** Which is what spec 0001 §6 predicted before
+any of this ran: *"the ledger's likeliest surviving column is `client`, and the
+honest first version may be one column rather than fourteen."* The other
+thirteen columns of Candidate A are not built, because no question asked for
+one.
 
-**What would reopen it:** evidence of an actual session load — a transcript, or
-a hook that records what was read. That is runtime observation, not static
-indexing, and it is not what Candidate A specifies. Spec 0002 §13's permanent
-UNKNOWN — *whether a rule file is loaded by any session, absent Candidate A* —
-is sharpened by this run: Candidate A as written would not have answered it
-either, because it would have had to read the same static evidence phase 1
-already reads.
+**What the measurement hands the ticket that builds it**, so that it is built
+knowing what it can hold:
+
+| | rows | surface bytes |
+|---|---|---|
+| a vendor's own filename names the client | 81 | 841,220 |
+| nothing static names one | 237 | 1,707,616 |
+
+For the second group — the whole of Advisor-Desk's rule corpus among them —
+there is no static evidence to read, so the honest value is an explicit UNKNOWN
+carrying its reason, the way an identical-byte pair already carries one. A
+`client` column that guessed for those rows would record inference as fact,
+which spec 0002 §5 forbids.
+
+**And one observation the build has to answer before it starts.** For the 81
+rows, `client` would be read off `path` by the same convention this ticket's own
+SQL used, and `recognition = 'vendor-name'` already records that the filename is
+a vendor's. Whether that makes it a stored column, a derived view, or a table
+beside the recognition name is a design question for the ticket that builds it.
+It is **not** a reason to decline it here.
+
+**This section is a correction.** A first pass concluded *not built*, on the
+ground that a column derivable from a column already present is not a column.
+That test was invented after the data, which is the move spec 0002 §9 exists to
+stop — *"falsifiable, written now, so the answer is not negotiated after the
+fact."* The observation survives, as a note to the build. The decision is the
+rule's.
+
+**What would have closed the gate:** all three questions answering, or three
+different columns missing. Neither happened.
 
 ## Part 4 — Gate B: do evidence columns earn their place?
 
@@ -625,41 +655,62 @@ Neither class is reachable by `markdown-link`, `frontmatter-field`,
 finding here depends on which rule produced it**, and the population figure is
 the measurement rather than the 37-row sample.
 
-### The decision: `detector` is already on the row, and `evidence_class` is not built
+### The decision: the gate opens; `detector` is already built, `evidence_class` is not
 
-The pre-registered rule fires on its second branch: the rate varies sharply
-between detectors. What that branch requires is stated in the ticket — *a
-finding whose reliability depends on which rule produced it must carry that
-rule.*
+The pre-registered rule fires on its second branch: **the rate varies sharply
+between detectors.** Branch one requires low *and* uniform; it is low, and it is
+not uniform. So Candidate B is **built** — `evidence_class` and `detector`, which
+is what spec 0001 §6 names it.
 
-**It already does.** `gl_context_edge.subtype` holds `bare-path-literal` and
-`markdown-link`. `gl_context_surface.recognition` holds `vendor-name`,
-`declared-marker` and `corpus-adjacent`. `gl_context_edge.direction_reason`
-holds why a pair carries no direction. Every rate in this section was read by
-detector using columns already present; without them the sample could not have
-been classified at all. The column Gate B would have opened for is built.
+**`detector` is already on the row, under three names.**
+`gl_context_edge.subtype` holds `bare-path-literal` and `markdown-link`.
+`gl_context_surface.recognition` holds `vendor-name`, `declared-marker` and
+`corpus-adjacent`. `gl_context_edge.direction_reason` holds why a pair carries
+no direction. Every rate in this section was read per detector using columns
+already present; without them the sample could not have been classified at all.
+So half of what the gate opens for is done, and the build is smaller than the
+candidate as written.
 
-**`evidence_class` is not built.** Neither branch of the pre-registered rule
-asks for it — the first calls the four-way class ceremony, and the second asks
-only that the finding carry its rule. Measured against this sample it would also
-be a function of the detector name: `vendor-name` and `declared-marker` are
-DECLARED, `corpus-adjacent` is the reading rather than the estate's statement,
-`markdown-link` is DECLARED and `bare-path-literal` is INFERRED. The codebase
-already keeps exactly that table — `INFERRED_RECOGNITIONS`, *"the values that are
-this tool's reading rather than the estate's statement"* — as a table over the
-recognition name rather than as a column. A column derivable from a column
-already on the row is not a column, which is the same test that closed Gate A.
+**`evidence_class` is not built here, and it is not declined.** The rule says
+build it; spec 0001 §11 puts Candidate B in phase 3, so this ticket records the
+decision and the phase-3 ticket builds it. What it inherits from this run:
+
+- **The four-way class maps onto the detector name on this evidence.**
+  `vendor-name` and `declared-marker` are DECLARED, `corpus-adjacent` is the
+  tool's reading rather than the estate's statement, `markdown-link` is
+  DECLARED, `bare-path-literal` is INFERRED. The codebase already keeps exactly
+  that table — `INFERRED_RECOGNITIONS`, *"the values that are this tool's
+  reading rather than the estate's statement"*. Whether `evidence_class` is
+  therefore a stored column or a declared table over the detector name is a
+  design question for that ticket, not grounds to skip it.
+- **The sample alone cannot carry the between-detector claim.** Thirty-seven of
+  the fifty rows are `bare-path-literal`; the six other detectors drew one to
+  four rows each, and a 0% cell at n=2 establishes very little. What carries the
+  branch is the population measurement — 157 of 1,306 `bare-path-literal` rows,
+  12.0%, against a class that `markdown-link` and the surface rules cannot
+  produce at all. A future sample wanting per-detector rates has to stratify by
+  detector, not only by family.
+
+**This section is a correction.** A first pass concluded *not built*, on two
+grounds, and one of them was false: it said *"neither branch of the
+pre-registered rule asks for it."* Spec 0001 §6 titles Candidate B *"evidence
+columns (`evidence_class`, `detector`)"* and branch two says of that candidate
+**→ built**. It does ask. Spec 0002 §9 makes a single false assertion a stop, so
+it is recorded here rather than quietly repaired. The second ground — that a
+derivable column is not a column — was a test invented after the data, and it
+survives above as a note to the build rather than as a decision.
 
 **The steady-state rate is 8%, against the 96% that came from one fixed bug.**
 That was the question the sample existed to answer, and it is answered: the
-phantom rate was the bug, not the tool.
+phantom rate was the bug, not the tool. It is also why the build is one column
+and a design question rather than the four-column scheme originally drawn.
 
 **What this leaves as work, and deliberately not done here:** the
 link-display-text class is a detector change, and changing a detector moves the
-detector set version, which would make every figure in this ticket
-incomparable with the one it was taken against. Ticket 14's rule holds —
-record what the run showed on the detector set that existed when it started.
-Recorded, and left for a ticket of its own.
+detector set version, which would make every figure in this ticket incomparable
+with the one it was taken against. Ticket 14's rule holds — record what the run
+showed on the detector set that existed when it started. Recorded, and left for
+a ticket of its own.
 
 ## What the audit found in the tool itself
 
@@ -697,24 +748,36 @@ for a producer named and not found.
 link-display-text rows above, for the detector-version reason given there.
 
 **And one the audit tripped in this repository by being written down.**
-`test_pointers.py` guards against detector drift by asserting that fewer than
-one in three of the distinct addresses named across this repository's prose
-resolve to nothing here. Recording this ticket took that reading from 29.6% to
-34.0% — 24 addresses, all of them paths in the four repositories audited above:
+`orbit/tests/test_pointers.py` guards against detector drift by asserting that
+fewer than one in three of the distinct addresses named across this
+repository's prose resolve to nothing here. Recording this ticket took that
+reading from **103 of 348 (29.6%) to 127 of 373 (34.0%)**. The 24 addresses it
+added are the evidence: 23 name files in the four repositories audited above —
 `contracts/ANCHOR-FORMAT.md` in Merit-knowledge,
 `.claude/tools/skill-sync/skills.json` in Home-system, two capture directories
-in Estimating-Lab, and so on. Every one was read correctly and resolved
-correctly. None of them can resolve here, by definition.
+in Estimating-Lab — and the twenty-fourth is `payload.json`, which names nothing
+anywhere, and is one of the four rows Part 4 classifies as a detector artifact.
+Every one was read correctly and resolved correctly. None can resolve here, by
+definition, and none of the 24 is a name of this repository's own.
 
 **The ceiling was not moved.** Its own comment sets it as a rule rather than a
 figure fitted to a reading, and it already describes this exact failure one step
 earlier — a breach that "said the repository had grown, not that the detectors
 had degraded, which is not what a guard is for". What grew this time is that the
-repository now contains an audit of four repositories that are not it. So the
-guard's population is narrowed to prose about this repository and the rule stays
-at one in three, which is also what spec 0002 §6 asks for: the acceptance run's
-report is evidence, and evidence is never asserted in a test. Both readings are
-recorded in the test beside the exclusion, so neither is hidden by it.
+repository now holds an audit of four repositories that are not it, and spec
+0002 §6 already covers that case: the acceptance run's report is evidence, and
+evidence *"is never asserted in a test"*.
+
+**What is excluded is that one file, not the ticket tree.** A first cut took the
+whole of `orbit/tickets/`, and it took too much: it also dropped `compare.py`,
+`rung_of.yaml` and `tests/test_ladders.py` — bare names of *this* repository's
+own files, written in other tickets' prose, which is exactly the detector
+behaviour the ceiling exists to watch. A guard that drops its own signal to stay
+under its ceiling is refitting by another route, whatever the comment above it
+says. Excluding the single evidence record removes 24 addresses, every one of
+them foreign to this repository, and leaves every other ticket in the
+population. Both readings are recorded in the test beside
+the exclusion, so neither is hidden by it.
 
 ## Kill conditions, checked against both parts
 
@@ -726,7 +789,7 @@ Spec 0001 §13 and spec 0002 §12, checked before any phase 2 work starts.
 | Its output starts being pasted into documents, or anyone asks it to write one | both parts | **Not met.** Every figure here is quoted into a ticket by hand with its detector version attached, which is the citation rule, not the tool authoring prose. |
 | The cold-start number rises during its existence | — | **Not measurable, recorded as a coverage gap.** The cold-start burden is spec 0001 §9, phase 2, behind Candidate A — which Gate A has now closed. This condition has no reading and will not acquire one on the current plan. |
 | It needs its own store, its own query language, or a second implementation | both parts | **Not met.** One DuckDB file, plain SQL, one implementation. Every query in Part 3 and Part 4 is SQL a reader can rerun. |
-| Someone reaches for it to decide something rather than to check something | both gates | **Not met, and tested.** Both gate decisions rest on figures the tool produced, and both decisions are *not built* — the tool was used to check two proposals and neither survived. |
+| Someone reaches for it to decide something rather than to check something | both gates | **Not met.** Both gate decisions rest on figures the tool produced, and both are the pre-registered rule's answer rather than a reading taken afterwards — which the first pass at both sections got backwards, and which is recorded there rather than repaired in silence. |
 | Recognition is widened until it matches everything | Part 1 | **Not met.** 87 of 201 files in C0; 35 of 1,348 in Home-system; 0 of 11 in Merit-knowledge. No detector was added during this ticket. |
 | The three states come back indistinguishable | Part 1 | **Not met.** 87, 103 and 126 surfaces; 201, 323 and 515 files; 781,674, 853,575 and 946,722 surface bytes. |
 | The comparison needs a new store, a second index, or a query language of its own | Part 1 | **Not met.** One `compare` invocation, one store. |
@@ -745,9 +808,14 @@ Spec 0002 §9, set before any data and applied here unchanged.
 - **Recognition on Advisor-Desk reconciles against the hand count** — 87
   surfaces in C0, unchanged from ticket 12's file-by-file reconciliation; the
   +16 in C1 is sixteen named `SKILL.md` files and nothing else.
-- **No finding asserts something false.** Two output defects that would have put
-  a false reading in front of a reader were found and repaired, and are recorded
-  above rather than quietly fixed.
+- **No finding asserts something false.** Three were caught and none stands.
+  Two output defects that would have put a false reading in front of a reader
+  were found in the tool and repaired. The third was in this ticket: a first
+  pass at Gate B asserted that neither branch of the pre-registered rule asks
+  for `evidence_class`, and spec 0001 §6 titles Candidate B *"evidence columns
+  (`evidence_class`, `detector`)"*. All three are recorded where they happened
+  rather than quietly fixed, because a ticket that edits away a false finding
+  without saying so teaches the next session nothing.
 - **Every question the run could not address is recorded as a coverage gap** —
   C2's shallow clone, the cold-start condition having no reading, and the three
   hand-built repositories being read from shallow clones with no history, so
@@ -776,23 +844,41 @@ rate read out per detector. Neither is the tool describing a file.
 - [x] Each Gate A question is marked answerable or not, with the SQL attempted
 - [x] 50 findings sampled and hand-classified, with the rate broken down by
       detector and by family
-- [x] Both gate decisions recorded — both are *not built*, which is a result
+- [x] Both gate decisions recorded — both gates **open**, each on its own
+      pre-registered branch: Gate A builds `client` and only `client`, Gate B
+      builds Candidate B, of which `detector` already exists and
+      `evidence_class` does not
 - [x] Any surface delta that moved because a corpus share moved says so — C2's
       −3, and C1's zero stated as well
 - [x] Kill conditions checked against both parts before any phase 2 work starts
 - [x] Output contains no forbidden vocabulary word
 
-## Either gate closing is a result, not a failure
+## Either gate closing is a result, not a failure — and neither closed
 
-Both closed. Recorded here with the evidence, so a future session sees that the
-load ledger and the evidence columns were tested against the estate rather than
-argued about, and does not propose either from scratch.
+**Both opened**, each on its own pre-registered branch, and both are much
+smaller than the candidate they opened for:
 
-**What closing them settles:** phase 1 is the tool. There is no phase 2 on the
-current plan, and spec 0001 §9's cold-start work — which depended on Candidate
-A — has no route through it.
+| gate | branch that fired | what it opens for |
+|---|---|---|
+| A — the load ledger | the same column missing each time | `client`, and only `client`. Thirteen of Candidate A's fourteen columns are not built, because no question asked for one. |
+| B — the evidence columns | the rate varies sharply between detectors | Candidate B. `detector` already exists under three names; `evidence_class` does not, and is phase-3 work. |
 
-**What it does not settle:** the estate has now been indexed once, and the two
+**Recorded so that a future session does not re-argue either.** They were
+tested against the real estate, the rules were written down before the data,
+and both rules were followed — including where following them overturned the
+answer this ticket first reached. What each build inherits is written beside
+the decision: for `client`, that it can be observed for 81 of 318 rows and is
+an explicit UNKNOWN for 237; for `evidence_class`, that the four-way class maps
+onto the detector name on this evidence, so whether it is a stored column or a
+declared table is a design question rather than a second gate.
+
+**What this settles:** phase 1 is finished, and it is the tool. Phase 2 is one
+column. Spec 0001 §9's cold-start work, which depended on Candidate A, has a
+route through it again — a narrow one, since the column it rests on is UNKNOWN
+for two-thirds of the estate's surface bytes, and that limit is now measured
+rather than assumed.
+
+**What it does not settle:** the estate has been indexed once, and the two
 families read very differently. Whether that difference is worth acting on is a
 recomposition question, which spec 0002 §11 keeps out of scope until after the
 audit. The audit is this ticket. The question is open, and it is Dylan's.

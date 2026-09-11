@@ -203,6 +203,27 @@ class Production:
     evidence_path: str
     evidence_line: int
 
+    @property
+    def is_an_edge(self) -> bool:
+        """Whether this claim has two ends the graph can hold.
+
+        The one place the rule lives. The edge writer and the tally that counts
+        edges both ask here, so the statistic and the graph cannot come apart,
+        and a third reason to decline is written once rather than once per
+        caller.
+
+        Two reasons to decline. A producer nothing in the tree matches has only
+        one end, and inventing the other would put a file in the graph the
+        repository does not hold. A producer that *is* the artifact has one end
+        twice, and an edge from a node to itself orders nothing.
+
+        Declining is not discarding: ``summary`` counts each case under its own
+        name, so a declaration the estate wrote does not read as a declaration
+        never written.
+        """
+        return (self.producer_path is not None
+                and self.producer_path != self.artifact_path)
+
 
 @dataclass(frozen=True)
 class Direction:
@@ -696,21 +717,21 @@ def summary(scan: Scan, matched: list[Pair],
     without_provenance = by_reason[NO_PRODUCER_AT_EITHER_END]
     with_provenance = len(matched) - without_provenance
 
-    # Counted exactly as the edge rule counts, so the statistic and the graph
-    # cannot come apart. Each production the rule declines gets a field of its
-    # own rather than being dropped: a declaration the estate wrote and this
-    # tool could not turn into an edge is not a declaration never written.
+    # `Production.is_an_edge` is the rule, asked here and by the edge writer,
+    # so the statistic and the graph cannot come apart. Each production it
+    # declines gets a field of its own rather than being dropped: a declaration
+    # the estate wrote and this tool could not turn into an edge is not a
+    # declaration never written.
     by_evidence = {rung: 0 for rung in EVIDENCE_LADDER}
     unresolved = 0
     self_naming = 0
     for production in productions:
-        if production.producer_path is None:
+        if production.is_an_edge:
+            by_evidence[production.evidence] += 1
+        elif production.producer_path is None:
             unresolved += 1
-            continue
-        if production.producer_path == production.artifact_path:
+        else:
             self_naming += 1
-            continue
-        by_evidence[production.evidence] += 1
     return {
         "pairs": len(matched),
         "pairs_with_provenance": with_provenance,

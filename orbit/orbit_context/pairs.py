@@ -456,10 +456,21 @@ def tell_apart(source: str, target: str, cut) -> tuple[str, str]:
     -- one directory of captures, one file name reused inside each, so the two
     agree at both ends and differ only where a middle elision cuts. Where that
     happens the shared prefix is elided instead, which moves what differs to
-    the front, where every cut keeps it. The segment boundary is tried first so
-    the remaining text starts at a path segment and stays readable; the exact
-    point of divergence is the fallback, and it is what makes the guarantee
-    hold rather than usually hold.
+    the front, where a cut keeps it. The segment boundary is tried first so the
+    remaining text starts at a path segment and stays readable; the exact point
+    of divergence is the fallback, and it is what takes this from usually to
+    always.
+
+    **Always, at any width of five or more**, which is a derivation rather
+    than a reading. After the prefix goes, what differs sits one character
+    past the marker, and a middle cut keeps ``(width - 1) // 2`` leading
+    characters -- so it survives once that head is two, which is width 5. A
+    pair short enough that no cut happens is returned whole and is distinct
+    because the inputs are.
+
+    Below five the cut can put both ends back to the same string. The bound is
+    stated rather than engineered around: every caller here cuts at 40 or more,
+    and `test_directions.py` pins it so a narrower one cannot arrive unnoticed.
     """
     left, right = cut(source), cut(target)
     if left != right or source == target:

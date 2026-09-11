@@ -43,33 +43,40 @@ from orbit_context.workspace import project_id_from_path
 # was set was 98 of 341, 28.7%.
 UNMATCHED_SHARE_CEILING = 0.33
 
-# Prose in this repository that names *other* repositories' files, excluded from
-# the population above. The ceiling is untouched.
+# The acceptance run's report, excluded from the population above. The ceiling
+# is untouched, and this is one file rather than a directory.
 #
-# Ticket 07 audited four repositories that are not this one, and an audit quotes
-# the paths it found -- `contracts/ANCHOR-FORMAT.md` in Merit-knowledge,
-# `.claude/tools/skill-sync/skills.json` in Home-system, two capture directories
-# in Estimating-Lab. None of them can resolve here, by definition. Reading the
-# whole tree, the share went 29.6% -> 34.0% the moment that evidence was
-# recorded: 24 addresses, every one of them read correctly, resolved correctly,
-# and about somewhere else.
+# Spec 0002 section 6 is the rule, and it was written before this: the
+# acceptance run "produces a report, hand-checked against what is already
+# known, recorded as evidence. It is never asserted in a test: a test that
+# reads live repository content fails whenever that content changes, including
+# from this work." Ticket 07 is that report. It audits four repositories that
+# are not this one, and an audit quotes the paths it found --
+# `contracts/ANCHOR-FORMAT.md` in Merit-knowledge,
+# `.claude/tools/skill-sync/skills.json` in Home-system, two capture
+# directories in Estimating-Lab. None of them can resolve here, by definition.
 #
-# That is the same growth the comment above already describes, one step further
-# along, and the same answer applies -- it said the repository had grown, not
-# that the detectors had degraded. Refitting the ceiling to it would be fitting
-# the rule to the reading, which the comment above refuses on purpose. So the
-# population is narrowed to prose about this repository, and the rule stays
-# where it was.
+# Readings, both recorded so neither is hidden by the other:
+#   whole tree                 127 of 373  34.0%   (over the ceiling)
+#   with this file excluded    103 of 348  29.6%
+# The exclusion removes 24 addresses. Twenty-three name files in the four
+# audited repositories; the twenty-fourth is `payload.json`, which names nothing
+# anywhere, and is one of the four findings that ticket's own sample classifies
+# as a detector artifact. None of the 24 is a name of this repository's own --
+# checked, because that is the whole difference between this cut and the one it
+# replaced.
 #
-# It is also what spec 0002 section 6 asks for. The acceptance run's report is
-# recorded as evidence and "is never asserted in a test: a test that reads live
-# repository content fails whenever that content changes, including from this
-# work." The ticket tree is where that report lives. A guard that reads it
-# measures the report rather than the detectors.
+# **One file, not the ticket tree.** A first cut took all of `orbit/tickets/`
+# and was wrong: it also dropped `compare.py`, `rung_of.yaml` and
+# `tests/test_ladders.py` -- bare names of *this* repository's own files,
+# written in other tickets' prose, which is exactly the detector behaviour the
+# ceiling exists to watch. A guard that drops its own signal to stay under its
+# ceiling is refitting by another route, whatever the comment above it says.
 #
-# Readings with this exclusion in place, taken together so both are visible:
-# 87 of 297 excluded (29.3%), 127 of 373 over the whole tree (34.0%).
-EVIDENCE_RECORDS = ("orbit/tickets/",)
+# So: the one evidence record that quotes other repositories, and every other
+# ticket stays in the population. A later acceptance run adds its report here,
+# and only if it too audits repositories that are not this one.
+EVIDENCE_RECORDS = ("orbit/tickets/07-audit-and-gates.md",)
 
 
 class TestBoundaries(unittest.TestCase):
@@ -409,7 +416,7 @@ class TestOnARealRepository(unittest.TestCase):
             except (OSError, UnicodeDecodeError):
                 continue
             relative = path.relative_to(cls.root).as_posix()
-            if relative.startswith(EVIDENCE_RECORDS):
+            if relative in EVIDENCE_RECORDS:
                 continue
             lines = text.splitlines()
             for pointer in pointers.extract(text):

@@ -769,8 +769,6 @@ class TestThisRepository(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestTwoDistinctPathsNeverPrintAsOne(unittest.TestCase):
@@ -828,6 +826,17 @@ class TestTwoDistinctPathsNeverPrintAsOne(unittest.TestCase):
         left, right = self.rendered(stem + "a.md", stem + "b.md")
         self.assertNotEqual(left, right)
 
+    def test_five_is_the_width_the_guarantee_starts_at(self):
+        # `tell_apart` derives the bound: what differs sits one character past
+        # the marker, a middle cut keeps (width - 1) // 2 leading characters,
+        # so it survives once that head is two. Pinned here so a caller cut
+        # narrower than the guarantee cannot arrive unnoticed -- every caller
+        # in this codebase cuts at 40 or more.
+        for width in range(5, 12):
+            with self.subTest(width=width):
+                left, right = self.rendered(self.SOURCE, self.TARGET, width)
+                self.assertNotEqual(left, right)
+
     def test_the_guarantee_holds_across_widths_and_divergence_points(self):
         for width in (12, 20, 44, 64):
             for cut in (4, 37, 48, 60):
@@ -835,3 +844,7 @@ class TestTwoDistinctPathsNeverPrintAsOne(unittest.TestCase):
                 with self.subTest(width=width, cut=cut):
                     left, right = self.rendered(source, self.TARGET, width)
                     self.assertNotEqual(left, right)
+
+
+if __name__ == "__main__":
+    unittest.main()

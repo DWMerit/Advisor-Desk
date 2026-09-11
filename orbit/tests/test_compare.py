@@ -45,7 +45,6 @@ from build_states import (
     TOOL, build,
 )
 from orbit_context import compare
-from orbit_context import compare as compare_module
 from orbit_context.cli import main
 
 
@@ -577,8 +576,6 @@ class TestTheCommandLine(unittest.TestCase):
         self.assertIn("/no/such/repository@c0", result.stderr)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestAFoldNeverPrintsOneNameTwice(unittest.TestCase):
@@ -595,12 +592,16 @@ class TestAFoldNeverPrintsOneNameTwice(unittest.TestCase):
     COUNTED_AS = "packages/rules/very-long-directory-other/full.md"
 
     def test_the_two_halves_of_a_fold_line_stay_distinct(self):
-        fold = compare_module.Fold(self.NAME, self.COUNTED_AS)
-        line = compare_module._fold_line(fold)
+        fold = compare.Fold(self.NAME, self.COUNTED_AS)
+        line = compare._fold_line(fold)
         left, _, right = line.partition(" counted as ")
         self.assertNotEqual(left.strip(), right.strip())
 
     def test_a_fold_that_already_printed_distinctly_is_left_alone(self):
-        fold = compare_module.Fold("a/full.md", "b/book.md")
-        self.assertEqual(compare_module._fold_line(fold),
+        fold = compare.Fold("a/full.md", "b/book.md")
+        self.assertEqual(compare._fold_line(fold),
                          "      a/full.md counted as b/book.md")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -339,13 +339,14 @@ def _identical_byte_edges(edge: EdgeType, repo: Repository,
 
 def _produces_edges(edge: EdgeType, repo: Repository,
                     productions: list[provenance_module.Production]) -> list[dict]:
-    """One edge per artifact whose producer resolved to a file in the tree.
+    """One edge per production with two ends the graph can hold.
 
-    A producer the estate named that nothing in the tree matches writes no
-    edge: an edge needs both ends, and inventing the missing one would put a
-    file in the graph that the repository does not hold. It is counted in the
-    statistics instead, so that a producer named but not found does not read as
-    a producer never named.
+    Which those are is `Production.is_an_edge`, asked there rather than spelled
+    again here: the tally in `provenance.summary` counts these edges, and a
+    rule written out twice is a rule that can come apart. Both cases it
+    declines -- a producer nothing in the tree matches, and a producer that is
+    its own artifact -- are counted in the statistics under their own names, so
+    neither reads as a producer never named.
     """
     return [
         _edge_row(
@@ -360,8 +361,7 @@ def _produces_edges(edge: EdgeType, repo: Repository,
             evidence_line=production.evidence_line,
         )
         for production in productions
-        if production.producer_path is not None
-        and production.producer_path != production.artifact_path
+        if production.is_an_edge
     ]
 
 

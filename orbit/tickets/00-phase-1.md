@@ -4,21 +4,30 @@ Spec: `orbit/specs/0001-observation-foundation.md`
 
 Seven tickets. **All seven are done. Phase 1 is finished.**
 
-**07 ran, and both gates closed.** The estate was read in its two families:
-the clone lineage as a controlled comparison at head `dc8d743`, the hand-built
-family — Home-system, Estimating-Lab, Merit-knowledge — as an audit with no
-baseline. Gate A: the load ledger is **not built**; `client` is the only
-candidate column that survived the three questions, and where a vendor filename
-names a client `path` already carries it, while for the 237 of 318 surface rows
-no filename names, the estate states nothing to observe. Gate B: the four-way
-`evidence_class` is **not built**, and the `detector` column the gate would have
-opened for is already on every row as `subtype`, `recognition` and
-`direction_reason`. The steady-state artifact rate is **8% over a 50-finding
-sample**, against the 96% that came from one fixed bug.
+**07 ran, and both gates opened — each much narrower than the candidate it
+opened for.** The estate was read in its two families: the clone lineage as a
+controlled comparison at head `dc8d743`, the hand-built family — Home-system,
+Estimating-Lab, Merit-knowledge — as an audit with no baseline.
 
-**Both gates closing means phase 2 is empty rather than blocked**, and spec
-0001 §9's cold-start work — which depended on Candidate A — has no route
-through it. The full evidence is in `07-audit-and-gates.md`.
+**Gate A** fires on *the same column missing each time*: all three loading
+questions are unanswerable, and what each one is missing is which client pays
+for a surface. **Build `client`, and only `client`** — the other thirteen
+columns of Candidate A are not built, because no question asked for one. The
+measurement the build inherits: `client` can be observed for 81 of 318 surface
+rows and is an explicit UNKNOWN for the other 237, which are two-thirds of the
+estate's surface bytes.
+
+**Gate B** fires on *the rate varies sharply between detectors*. The
+steady-state artifact rate is **8% over a 50-finding sample** — against the 96%
+that came from one fixed bug — uniform across families and not uniform across
+detectors. So Candidate B is built, and half of it already is: `detector` is on
+every row as `subtype`, `recognition` and `direction_reason`. `evidence_class`
+is not, and is phase-3 work.
+
+**Phase 2 is one column.** Spec 0001 §9's cold-start work, which depended on
+Candidate A, has a narrow route through it again. The full evidence, including
+two first-pass gate decisions this ticket had to correct, is in
+`07-audit-and-gates.md`.
 
 **07 originally did not run**, and the reason was closed before it did. Running
 the indexer against this repository returned **0 surfaces from 238 files
@@ -51,7 +60,7 @@ ladders where they were.
 | 04 | Pointers resolve; non-resolution is classified | 02 |
 | 05 | Identical bytes, reported with provenance | 02 |
 | 06 | Governance orientation in one command | 03, 04, 05 |
-| 07 | Audit the estate, and both gates | 06, 14 — **done, both gates closed** |
+| 07 | Audit the estate, and both gates | 06, 14 — **done, both gates opened** |
 
 **Prefactoring: none.** Greenfield — there is nothing to make easy first.
 
@@ -59,7 +68,7 @@ ladders where they were.
 
 A faithful small **Orbit over the estate's governance surface** — the half GitLab Orbit does not parse. Their architecture, storage, query surface, ontology format, command names. Only the domain changes: `source_code` → `context`.
 
-**Not in phase 1:** the load ledger, evidence columns, `would-load`, `setup`, cross-branch reading. Both additions were gated behind tests that could only run after phase 1 had been used (ticket 07). **Both gates have now run and both closed**, so neither addition is in any phase: they were tested against the estate and did not earn a place. `07-audit-and-gates.md` carries the evidence, so that a later session sees they were measured rather than merely considered.
+**Not in phase 1:** the load ledger, evidence columns, `would-load`, `setup`, cross-branch reading. Both additions were gated behind tests that could only run after phase 1 had been used (ticket 07). **Both gates have now run and both opened, each for far less than was drawn**: one column of Candidate A (`client`), and of Candidate B only `evidence_class`, `detector` being already present under three names. `07-audit-and-gates.md` carries the evidence and the two corrections it took to reach it.
 
 ## Architecture, already verified
 

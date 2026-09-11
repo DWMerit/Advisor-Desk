@@ -432,8 +432,6 @@ class TestThisRepository(unittest.TestCase):
         self.assertEqual(linked & set(self.scan.contents), set())
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestTheProducesCountIsACountOfEdges(unittest.TestCase):
@@ -515,3 +513,7 @@ class TestTheProducesCountIsACountOfEdges(unittest.TestCase):
     def test_the_declination_is_named_rather_than_dropped(self):
         # The manifest said something. It is not an edge and it is not nothing.
         self.assertEqual(self.block["producer_and_artifact_are_one_file"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

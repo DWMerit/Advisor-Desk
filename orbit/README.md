@@ -18,9 +18,12 @@ attaches. Orbit's CLI reads one file or the other.
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
 
 **Phase 1 is complete**: tickets 01–07, with 09–15 closing the recognition gap
-07 needed. Both of the gated additions were tested against the real estate in
-ticket 07 and both closed — the load ledger is not built and the four-way
-`evidence_class` is not built, each for a reason recorded with its figures in
+07 needed. Both gated additions were tested against the real estate in ticket
+07 and **both gates opened, each for far less than was drawn**: of the load
+ledger's fourteen columns only `client`, and of the evidence columns only
+`evidence_class`, since `detector` is already on every row as `subtype`,
+`recognition` and `direction_reason`. The figures, and the two first-pass
+decisions the ticket had to correct, are in
 `orbit/tickets/07-audit-and-gates.md`.
 
 Five node types and four edge types. `Surface` covers
@@ -1217,6 +1220,12 @@ the middle of their paths printed as one file beside itself, and `produces_edges
 counted one production the edge writer had declined. Both are rendering and
 accounting, so the detector set is unmoved at `1.8eabab386316` and every figure
 above is comparable with the ones before it.
+
+A third was found and recorded rather than repaired — 157 of 1,306
+`bare-path-literal` rows restate a markdown link sitting on the same line, one
+pointer reported twice. Repairing it moves the detector set version, which would
+make ticket 07's figures incomparable with ticket 14's, so it is left to a
+ticket of its own. It is also the measurement that opened Gate B.
 
 ## Statistics
 
