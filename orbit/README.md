@@ -16,6 +16,9 @@ connection, so a query spanning both graphs runs only from a connection that
 attaches. Orbit's CLI reads one file or the other.
 
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
+`orbit/specs/0003-estate-archaeology-and-evidence-driven-recomposition.md`
+is a program spec filed beside these, not an Orbit build spec: it reads
+with Orbit and decides nothing about it.
 
 **Phase 1 is complete**: tickets 01–07, with 09–15 closing the recognition gap
 07 needed. Both gated additions were tested against the real estate in ticket
