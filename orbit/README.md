@@ -17,7 +17,13 @@ attaches. Orbit's CLI reads one file or the other.
 
 Spec: `orbit/specs/0001-observation-foundation.md`. Tickets: `orbit/tickets/`.
 
-Phase 1, tickets 01–06. Five node types and four edge types. `Surface` covers
+**Phase 1 is complete**: tickets 01–07, with 09–15 closing the recognition gap
+07 needed. Both of the gated additions were tested against the real estate in
+ticket 07 and both closed — the load ledger is not built and the four-way
+`evidence_class` is not built, each for a reason recorded with its figures in
+`orbit/tickets/07-audit-and-gates.md`.
+
+Five node types and four edge types. `Surface` covers
 every governance object — instruction surfaces, skill packages, agent
 definitions, slash commands, hook definitions and MCP servers. `Clause` is one
 addressable fragment inside a surface, and `CONTAINS` holds the two together.
@@ -1179,6 +1185,39 @@ that kept its links and the shape whose links were resolved — because a test
 that reads live repository content fails whenever that content changes,
 including from this work.
 
+### The estate, in two families
+
+Ticket 07, the same detector set again. The estate splits in two, and the two
+halves support different statements: Advisor-Desk and agent-rules-books share an
+upstream, so they can be differenced; Home-system, Estimating-Lab and
+Merit-knowledge share nothing, so they are read as absolute figures and no delta
+is computed between any of them.
+
+```
+                        Home-system   Estimating-Lab   Merit-knowledge
+files walked                   1348              601                11
+bytes walked               40849304         23716125            106314
+surface rows                     36               25                 0
+surface bytes                499428           247487                 0
+clauses                         920              578                 0
+pointers                        622              229                 0
+identical-byte pairs              9                1                 0
+```
+
+**Merit-knowledge returns zero from eleven files, and the zero is exact rather
+than empty.** No file there carries a name a vendor defined, none opens with the
+one directive heading word this set reads, and with nothing declared no
+directory reaches the corpus share. It is a repository of format contracts that
+this detector set does not recognise, which is a statement about the detector
+set and not about those files.
+
+Two defects in the tool's own output were found by running it over repositories
+it had not seen, and both are repaired: a pair of two files differing only in
+the middle of their paths printed as one file beside itself, and `produces_edges`
+counted one production the edge writer had declined. Both are rendering and
+accounting, so the detector set is unmoved at `1.8eabab386316` and every figure
+above is comparable with the ones before it.
+
 ## Statistics
 
 `index` prints JSON in Orbit's shape — `repository`, `path`, `time_seconds`,
@@ -1191,7 +1230,13 @@ counts `repositories`, `surfaces`, `clauses`, `edges` and `pointers`, and report
 at zero. `identical_bytes` is the byte-identity, provenance and direction block above,
 present at estate level and per repository, with every key reported even at
 zero — each rung of the ladder, and each of the three reasons a pair carries no
-direction. Skipped entries carry
+direction. `produces_edges` counts `PRODUCES` rows and nothing else; each
+production the edge rule declines is named in a key of its own, so that a
+declaration the estate wrote and the tool could not turn into an edge does not
+read as a declaration never written —
+`producer_named_no_indexed_target_match` for a producer that matched nothing
+indexed, `producer_and_artifact_are_one_file` for a declaration naming one file
+as both its own input and its own output. Skipped entries carry
 `reason`, errored entries carry `kind`, matching their `SkippedFile` and
 `ErroredFile`. A `repositories` array itemises each repository found under the
 indexed root, and `schema` reports, per table, which columns the YAML added and

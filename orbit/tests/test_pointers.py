@@ -43,6 +43,34 @@ from orbit_context.workspace import project_id_from_path
 # was set was 98 of 341, 28.7%.
 UNMATCHED_SHARE_CEILING = 0.33
 
+# Prose in this repository that names *other* repositories' files, excluded from
+# the population above. The ceiling is untouched.
+#
+# Ticket 07 audited four repositories that are not this one, and an audit quotes
+# the paths it found -- `contracts/ANCHOR-FORMAT.md` in Merit-knowledge,
+# `.claude/tools/skill-sync/skills.json` in Home-system, two capture directories
+# in Estimating-Lab. None of them can resolve here, by definition. Reading the
+# whole tree, the share went 29.6% -> 34.0% the moment that evidence was
+# recorded: 24 addresses, every one of them read correctly, resolved correctly,
+# and about somewhere else.
+#
+# That is the same growth the comment above already describes, one step further
+# along, and the same answer applies -- it said the repository had grown, not
+# that the detectors had degraded. Refitting the ceiling to it would be fitting
+# the rule to the reading, which the comment above refuses on purpose. So the
+# population is narrowed to prose about this repository, and the rule stays
+# where it was.
+#
+# It is also what spec 0002 section 6 asks for. The acceptance run's report is
+# recorded as evidence and "is never asserted in a test: a test that reads live
+# repository content fails whenever that content changes, including from this
+# work." The ticket tree is where that report lives. A guard that reads it
+# measures the report rather than the detectors.
+#
+# Readings with this exclusion in place, taken together so both are visible:
+# 87 of 297 excluded (29.3%), 127 of 373 over the whole tree (34.0%).
+EVIDENCE_RECORDS = ("orbit/tickets/",)
+
 
 class TestBoundaries(unittest.TestCase):
     """What a detector captures, before anything is resolved."""
@@ -381,6 +409,8 @@ class TestOnARealRepository(unittest.TestCase):
             except (OSError, UnicodeDecodeError):
                 continue
             relative = path.relative_to(cls.root).as_posix()
+            if relative.startswith(EVIDENCE_RECORDS):
+                continue
             lines = text.splitlines()
             for pointer in pointers.extract(text):
                 found = pointers.resolve(pointer.address, cls.root, relative)
