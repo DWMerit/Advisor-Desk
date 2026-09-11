@@ -131,3 +131,27 @@ have seen least.
 
 Record it, so a future session sees the additions were tested rather than
 re-proposing them from scratch.
+
+---
+
+# Gate A — the three questions, written before the data
+
+**Committed on its own, before any query was run against the phase-1 tables**, so
+that the order is in the history rather than asserted afterwards. Nothing below
+was chosen for being answerable; the schema was not consulted while writing
+them. Head at the time of writing: `38b9dce`.
+
+**Q1 — When a session opens in this repository, which surfaces reach it, and
+what do they weigh?** The cold-start bill, per client. Not "which surfaces
+exist" — which ones arrive without anybody asking for them.
+
+**Q2 — Of the bytes that reach a session, which are paid for twice?** The same
+content arriving under two names, or a smaller rung of a ladder arriving
+alongside a larger one that already contains it.
+
+**Q3 — Which of those surfaces can a session stop paying for, and which are
+unconditional?** A surface that loads on a trigger costs nothing until the
+trigger fires. A surface that loads always is a floor.
+
+Each is attempted below in plain SQL over the phase-1 tables, and marked
+answerable or not answerable with the SQL that was attempted either way.
