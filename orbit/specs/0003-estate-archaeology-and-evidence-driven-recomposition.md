@@ -87,15 +87,31 @@ finding against the tool.
 - **F6 — Pointer-ceiling headroom is finite, and Gate 1 will spend it.** The
   drift guard is a share: distinct addresses named in this repository's prose
   that resolve to nothing here, ceiling 0.33. The reading with ticket 07
-  excluded was 103 of 348 (29.6%) at that head, and 103 of 349 (29.5%) with
-  this spec added, which names no address that fails to resolve here. Gate 1 fixtures quote addresses in four other
-  repositories by their nature. Each fixture ticket therefore has to say, at
-  the time it lands, how its addresses are held — as an evidence record on the
-  same rule ticket 07 was granted, or by carrying the addresses outside this
-  repository's prose. Lowering the ceiling to fit is refitting, which the guard
-  exists to stop.
-- **F7 — The Sandcastle report is not in this repository.** See §4.1. It is an
-  entry condition for Gate 1, not a Gate 0 finding.
+  excluded was 103 of 348 (29.6%) at that head. **Measured again after this
+  spec and the committed report: 103 of 350, 29.4%.** The report adds no
+  unmatched address of its own — it names its evidence by URL, and 46 of its
+  addresses carry a scheme, which the guard does not count — so what moved the
+  denominator is this spec naming the file. Gate 1 fixtures are the ones that
+  will spend the headroom, because they quote addresses in four other
+  repositories by their nature. Each fixture therefore has to say, at the time
+  it lands, how its addresses are held — as an evidence record on the same rule
+  ticket 07 was granted, or by carrying the addresses outside this repository's
+  prose. Lowering the ceiling to fit is refitting, which the guard exists to
+  stop.
+- **F7 — The Sandcastle report, closed on 2026-09-11.** It was outside this
+  repository when the disposition was written. It is now committed at its exact
+  bytes as `orbit/evidence/sandcastle-adr-comparative-archaeology.md` (§4.1),
+  which is the entry condition Gate 1 was waiting on.
+- **F8 — An SC-A14 generalization test, recorded for Orbit and not added to
+  Gate 0's criteria.** The report's own corpus carries four provenance
+  conditions: duplicate ADR numbering, a referenced-but-absent ADR, a
+  documented decision whose implementation sits outside canonical `main`, and
+  prose superseded by later code behaviour. Generalized past Sandcastle, they
+  are a test of whether an observer can report the document, branch,
+  implementation and drift relationships it can see **without inferring
+  authority, correctness, supersession, or local adoption** where no evidence
+  supports the inference. Orbit has not been set this test. It is recorded as a
+  follow-up, and Gate 0's original criteria stay as they were written.
 
 ### 2.3 What Gate 0 does not settle
 
@@ -152,14 +168,15 @@ estate adopts.
 
 | Report content | Standing here |
 |---|---|
-| 21 decisions examined | Input, catalogued |
+| 21 decisions examined, across 20 files and 19 numbers on `main` | Input, catalogued. The arithmetic is itself the report's first finding |
 | 12 independently corroborated principles | **Replay lenses** for Gate 3. Not estate rules |
 | 5 decisions worth testing | **Hypotheses**, each carrying a falsifier before it is used |
 | 2 Sandcastle-specific decisions | Not imported |
 | 2 container/UID decisions | Irrelevant here, recorded so they are not revisited |
 | 14 audit probes, SC-A01–SC-A14 | **Test probes** applied to fixtures and replays. Not fourteen governance requirements |
-| 6 cross-repository failure families | Grouping for Gate 1 episode selection |
-| 8 recommended historical episodes | The Gate 1 backlog (§5.2) |
+| 8 reusable audit families | The twelve corroborated principles, collapsed |
+| 6 cross-repository failure episodes, A–F | The crosswalk: which repositories show the same chain |
+| 8 recommended replay seeds | The Gate 1 backlog (§5.2) |
 | The failure-episode ledger structure | The origin of the fixture contract in §5.1 |
 
 **Five things stay separate and are never collapsed into one status:** an
@@ -168,29 +185,22 @@ implementation evidence behind it; whether it was superseded; and whether
 anything here has adopted it. A principle being corroborated in that estate is
 not adoption in this one.
 
-### 4.1 Entry condition — the report is not in this repository
+### 4.1 The report, committed as evidence
 
-The complete report was not found in this repository, in the estate on this
-machine, or on the PR. The Sandcastle material itself lives outside the
-machines this work runs on. **Before Gate 1 opens, the complete report is
-attached at a named, readable location**, because probes have to be quoted from
-their source rather than from a summary of it.
+The complete report is committed at
+`orbit/evidence/sandcastle-adr-comparative-archaeology.md`, at its exact bytes.
+It names its own review date, the repositories and commits it examined, its
+scope and its limitations, and Git holds its blob identity. **Gate 1's entry
+condition is met.**
 
-Until then, the probe identities usable without the report are the ones already
-recorded in the program record:
+All fourteen probes, SC-A01 to SC-A14, are defined there, with the evidence each
+one needs for a `PASS` and the replay seed it came from. They are not reproduced
+here: one copy, in the file that carries its own provenance. A probe applied
+from a paraphrase is not a probe.
 
-| Probe | What it tests |
-|---|---|
-| SC-A01 | Point-of-use state |
-| SC-A03 | Isolation vector |
-| SC-A05 | Explicit successful nothing |
-| SC-A06 | Artifact contract |
-| SC-A08 | Real enforcement |
-| SC-A11 | Signal honesty |
-| SC-A14 | Decision provenance |
-
-The remaining seven are named in the report and are not reproduced from memory
-here. A probe applied from a paraphrase is not a probe.
+Committing it changes nothing about its standing. It is comparative evidence
+about another estate, its location grants it no authority, and neither Sandcastle
+nor any mechanism of Sandcastle's becomes a dependency of this one.
 
 ## 5. Gate 1 — historical reconstruction
 
@@ -212,7 +222,10 @@ absent: **a fixture never invents a fact the record cannot supply.**
 8. Repair attempted.
 9. Evidence that the repair held, failed, or remains unknown.
 10. Estimating effect.
-11. Applicable SC-A probes.
+11. Sandcastle cross-reference, in the report's own four dispositions: a
+    corroborated principle, a Sandcastle-specific contrast, a test hypothesis,
+    or an irrelevant operating condition — with the SC-A probes that apply
+    where they are useful. Never automatic authority.
 12. Replay scenario.
 13. Falsifier — what reading of the evidence would show the reconstruction
     does not hold.
@@ -235,14 +248,23 @@ Episodes 1 and 2 come from the report's eight recommendations. Episode 3 was
 observed in this program, not in the report, so the Gate 1 backlog is **nine**:
 the report's eight, plus this one.
 
+**The anchors the report supplies for the first two** are Estimating-Lab
+`077776de` and Home-system `5ffc8bfb`, with the chain around each set out in the
+report. They are starting addresses for a reconstruction, not the
+reconstruction: a fixture is built from the evidence around a commit, not from
+the commit's own message.
+
 The six remaining recommended episodes, instantiated after the first three:
 
-- A lab observation becomes accepted truth.
-- Generated boot drifts from its source.
-- PROVEN is read as promoted or adopted.
-- A convenience index becomes authority.
-- Imported Orbit vocabulary changes meaning in its new home.
-- A session closes before its evidence lands.
+4. A lab observation becomes accepted truth.
+5. Generated boot drifts from its source.
+6. PROVEN is read as promoted or adopted.
+7. A convenience index becomes authority, and maintenance work.
+8. Imported Orbit vocabulary changes meaning in its new home.
+9. A session closes before its evidence lands.
+
+Each one's probes are named beside it in the report's recommended replay set,
+and are read from there when its fixture is built.
 
 ### 5.3 Pass mark, and what Gate 1 may not produce
 
@@ -276,6 +298,11 @@ For each candidate responsibility, nine fields:
 
 **Advisor-Desk is historical evidence.** It is not automatically an active
 authority, and it is not automatically a boundary in anything that comes after.
+The report reaches the same place from outside: it inspected Advisor-Desk and
+excluded it as an active estate authority, on the ground that its `main` history
+ends in May and the later Desk failures are recorded in `agent-rules-books`. It
+examined `main` at `a7d7649`, which is not the branch this program's own record
+sits on — a difference to keep in view rather than argue from.
 The same holds for every other repository in the estate: appearing in the
 evidence confers nothing.
 
@@ -410,9 +437,8 @@ Written now, so stopping is a planned outcome rather than a failure.
 ## 14. Reserved for Dylan
 
 1. Whether this program runs at all. §12 stands.
-2. Where the complete Sandcastle report is attached from (§4.1).
-3. Which estimating work Gate 4 is measured on, and what "a usable estimating
+2. Which estimating work Gate 4 is measured on, and what "a usable estimating
    decision" means for it.
-4. How many candidate designs Gate 3 carries.
-5. The adoption decision at Gate 5, and the order of any migration.
-6. Whether Advisor-Desk stays the home of this program's record, given §0.
+3. How many candidate designs Gate 3 carries.
+4. The adoption decision at Gate 5, and the order of any migration.
+5. Whether Advisor-Desk stays the home of this program's record, given §0.
