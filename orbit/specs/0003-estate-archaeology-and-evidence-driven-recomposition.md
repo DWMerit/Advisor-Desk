@@ -125,23 +125,43 @@ Three gates share a vocabulary and settle different things. They stay apart.
 
 | Gate | Question | Outcome |
 |---|---|---|
-| Ticket 07 Gate A | Does the load ledger earn its place? | **Open**, on the branch *the same column is missing each time* |
-| Ticket 07 Gate B | Do evidence columns earn their place? | **Open**, on the branch *the rate varies sharply between detectors* |
+| Ticket 07 Gate A | Does the load ledger earn its place? | **Undecided.** Rule branch taken: *the same column is missing each time* |
+| Ticket 07 Gate B | Do evidence columns earn their place? | **Undecided.** Rule branch taken: *the rate varies sharply between detectors* |
 | Program Gate 0 | Does Orbit report its current observations correctly, reproducibly, traceably? | **Pass with recorded follow-ups** (§2) |
 
 Gate A and Gate B are Orbit build decisions. Gate 0 is a disposition about the
 observer's honesty. Neither is evidence for the other.
 
-### 3.1 The Orbit roadmap, already decided, recorded so it is not re-argued
+### 3.1 Neither gate is decided, and a rule firing is not a decision
 
-- **Phase 2 adds `client`, and only `client`.** Thirteen of Candidate A's
-  fourteen columns are not built, because no question asked for one.
+**Both gates are undecided until a test shows the addition would be beneficial.**
+Dylan's call, 2026-09-12, and it corrects what this section previously recorded.
+
+The pre-registered rules fired. Gate A's rule says that when the same column is
+missing from every question, build only that column; Gate B's says that when the
+false-positive rate varies sharply between detectors, the finding must carry its
+rule. Both branches were taken on the evidence below. **Taking a rule's build
+branch is not the same as showing the built thing earns its place** — the rule
+establishes that a question could not be answered without the column, not that
+answering it is worth a column. This project has drawn that line everywhere
+else, and recording "already decided" here crossed it.
+
+What a benefit test would have to show is **not written here**. Writing it is a
+pre-registration, and pre-registering a rule after seeing the data it will run
+on is the failure both gates exist to avoid. It is Dylan's to write, before any
+build ticket is cut.
+
+The measurements stand, and are the input to that test when it is written:
+
+- **Only `client` was ever a candidate.** Thirteen of Candidate A's fourteen
+  columns are out regardless of how the gate settles, because no question asked
+  for one.
 - **`client` is statically observable for 81 of 318 surface rows** (841,220
   surface bytes).
 - **The other 237 rows are an explicit UNKNOWN carrying its reason** (1,707,616
   bytes, two-thirds of the estate's surface bytes). A value guessed for those
   rows would record inference as fact.
-- **Phase 3 adds `evidence_class`.**
+- **`evidence_class` is the only column Gate B would add.**
 - **Detector identity already exists**, on every row, as
   `gl_context_edge.subtype`, `gl_context_surface.recognition` and
   `gl_context_edge.direction_reason`. Half of what Gate B opened for is built.
@@ -157,8 +177,9 @@ observer's honesty. Neither is evidence for the other.
   working skills. Gate 1 may ask what produced the difference. No gate treats
   the low number as a defect.
 
-Phase 2 and phase 3 run beside this program, on spec 0001's schedule. **Neither
-is a condition of any gate here, and this spec does not start either.**
+Neither column is scheduled. **Neither is a condition of any gate here, this
+spec does not start either, and no ticket may be cut for either until a benefit
+test is written and passed.**
 
 ## 4. The Sandcastle material, and the standing it has
 

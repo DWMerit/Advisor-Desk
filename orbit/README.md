@@ -99,35 +99,56 @@ orbit/bin/orbit-context ladder refactoring --repo /path/to/the/repository
 orbit/bin/orbit-context ladder --repo /path/to/the/repository
 ```
 
-Then query it with Orbit's own CLI, pointed at our file:
+Then query it with Orbit's own CLI. **Point it at our file every time.** Without
+`--db`, `orbit local sql` reads `~/.orbit/graph.duckdb` — GitLab Orbit's own
+store, not this one — and it does not fail when it does. Measured on this
+repository the same query returned **3 rows** unpointed and **495** pointed. A
+plausible small number is the worst possible wrong answer, because nothing about
+it looks wrong.
+
+**And scope to one snapshot.** The store holds every run ever indexed, keyed by
+`(project_id, branch, commit_sha)` — the same key `orbit/orbit_context/store.py`
+replaces rows on. The 495 above is five runs summed; the current snapshot holds
+**117**. An unscoped `count(*)` answers "every run ever", which is not a
+statement about the estate. The examples below are written unscoped to keep them
+readable — add the snapshot clause before reading any figure as current:
 
 ```sh
-orbit local sql "SELECT surface_kind, name, path, size_bytes FROM gl_context_surface
+orbit local sql --db ~/.orbit-context/context.duckdb \
+  "SELECT count(*) FROM gl_context_surface s
+     JOIN (SELECT project_id, branch, commit_sha
+             FROM gl_context_run ORDER BY indexed_at DESC LIMIT 1) r
+       ON s.project_id = r.project_id AND s.branch = r.branch
+      AND s.commit_sha = r.commit_sha"
+```
+
+```sh
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT surface_kind, name, path, size_bytes FROM gl_context_surface
                  ORDER BY size_bytes DESC"
 
 # What a cold session pays for skills, against what the files weigh.
-orbit local sql "SELECT sum(frontmatter_bytes) AS boot, sum(size_bytes) AS total
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT sum(frontmatter_bytes) AS boot, sum(size_bytes) AS total
                  FROM gl_context_surface WHERE surface_kind = 'skill-package'"
 
 # Every hook, where it is defined, and where its command goes.
-orbit local sql "SELECT path || ':' || start_line AS locator, name, matcher,
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT path || ':' || start_line AS locator, name, matcher,
                         target_resolution, target_path
                  FROM gl_context_surface
                  WHERE surface_kind = 'hook-definition' ORDER BY locator"
 
-orbit local sql "SELECT c.path, c.surface_kind, c.size_bytes, f.language
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT c.path, c.surface_kind, c.size_bytes, f.language
                  FROM gl_context_surface c
                  JOIN gl_file f ON f.path = c.path AND f.project_id = c.project_id
                  ORDER BY c.size_bytes DESC"
 
 # Every rule in an instruction surface, with its address and what it weighs.
-orbit local sql "SELECT fqn, end_byte - start_byte AS bytes, start_line
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT fqn, end_byte - start_byte AS bytes, start_line
                  FROM gl_context_clause
                  WHERE surface_path = 'CLAUDE.md' AND clause_type = 'list-rule'
                  ORDER BY bytes DESC"
 
 # How deep the nesting goes, walked over CONTAINS.
-orbit local sql "WITH RECURSIVE walk(id, depth) AS (
+orbit local sql --db ~/.orbit-context/context.duckdb "WITH RECURSIVE walk(id, depth) AS (
                    SELECT target_id, 1 FROM gl_context_edge
                     WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Surface'
                    UNION ALL
@@ -139,17 +160,17 @@ orbit local sql "WITH RECURSIVE walk(id, depth) AS (
                  GROUP BY 1 ORDER BY 2 DESC"
 
 # The three negative findings, kept apart. One row per address, not per mention.
-orbit local sql "SELECT sub_kind, count(*) AS addresses
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT sub_kind, count(*) AS addresses
                  FROM gl_context_external_ref GROUP BY 1 ORDER BY 2 DESC"
 
 # Which rule points where, with the locator and whether it sat in a fenced block.
-orbit local sql "SELECT source_path || ':' || source_line AS locator, subtype,
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT source_path || ':' || source_line AS locator, subtype,
                         target_address, target_kind, target_path, in_code_fence
                  FROM gl_context_edge
                  WHERE relationship_kind = 'REFERENCES' ORDER BY locator"
 
 # Every address named in the estate that no file here matches, and who names it.
-orbit local sql "SELECT x.address, count(*) AS mentions,
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT x.address, count(*) AS mentions,
                         min(e.source_path || ':' || e.source_line) AS first_written
                  FROM gl_context_external_ref x
                  JOIN gl_context_edge e ON e.target_id = x.id
@@ -158,7 +179,7 @@ orbit local sql "SELECT x.address, count(*) AS mentions,
 
 # Byte-identical pairs, each with whatever provenance either end carries.
 # The two are read together on purpose: the pair count alone over-reads.
-orbit local sql "SELECT i.source_path, i.target_path, p.subtype AS evidence,
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT i.source_path, i.target_path, p.subtype AS evidence,
                         p.source_path AS producer,
                         p.evidence_path || ':' || p.evidence_line AS evidenced_at
                  FROM gl_context_edge i
@@ -170,7 +191,7 @@ orbit local sql "SELECT i.source_path, i.target_path, p.subtype AS evidence,
                  ORDER BY i.source_path"
 
 # How many identical-byte pairs carry any provenance evidence at all.
-orbit local sql "SELECT count(*) AS pairs,
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT count(*) AS pairs,
                         count(*) FILTER (WHERE producer IS NOT NULL) AS with_provenance
                  FROM (SELECT i.source_path, max(p.source_path) AS producer
                        FROM gl_context_edge i
@@ -182,14 +203,14 @@ orbit local sql "SELECT count(*) AS pairs,
                        GROUP BY i.source_path, i.target_path)"
 
 # Every producer the estate names, on the rung of evidence it stands on.
-orbit local sql "SELECT subtype AS evidence, source_path AS producer,
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT subtype AS evidence, source_path AS producer,
                         target_path AS artifact, source_address AS named_as,
                         evidence_path || ':' || evidence_line AS evidenced_at
                  FROM gl_context_edge
                  WHERE relationship_kind = 'PRODUCES' ORDER BY subtype, artifact"
 
 # What the estate declares superseded, beside the surface that still loads.
-orbit local sql "SELECT e.source_path || ':' || e.source_line AS claimed_at,
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT e.source_path || ':' || e.source_line AS claimed_at,
                         e.target_address, s.surface_kind, s.size_bytes
                  FROM gl_context_edge e
                  LEFT JOIN gl_context_surface s
@@ -865,7 +886,7 @@ and enter it — so it is unioned in rather than joined to, or a book comes back
 one rung short of itself:
 
 ```sh
-orbit local sql "SELECT r.ladder, s.path, s.size_bytes, r.rung
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT r.ladder, s.path, s.size_bytes, r.rung
                  FROM (SELECT target_path AS ladder, source_path AS path, subtype AS rung,
                               project_id, branch, commit_sha
                          FROM gl_context_edge WHERE relationship_kind = 'RUNG_OF'
