@@ -113,6 +113,19 @@ finding against the tool.
   supports the inference. Orbit has not been set this test. It is recorded as a
   follow-up, and Gate 0's original criteria stay as they were written.
 
+- **F9 — A write path in a test is read as a production.** Writing a
+  `CLAUDE.md` for this repository, which had none, made two test fixtures
+  resolve that never had: each builds a `CLAUDE.md` inside a temporary
+  directory, and the detector matches that write path to the only `CLAUDE.md`
+  indexed here. Two false productions, both checked by hand, both recorded in
+  `orbit/tests/test_provenance.py` by name so the guard still fails on a third.
+  **Recorded and not repaired**, on F2's rule: repairing it moves the detector
+  set, and a moved detector set makes tickets 07 and 14 incomparable with the
+  figures they were taken against. It is a condition of the detector meeting a
+  tmpdir, not a statement about either test — and the guard that caught it did
+  so on the first ordinary file that triggered it, which is the behaviour that
+  was wanted.
+
 ### 2.3 What Gate 0 does not settle
 
 It says the observer reports honestly. It says nothing about what shape the estate
@@ -177,9 +190,15 @@ The measurements stand, and are the input to that test when it is written:
   working skills. Gate 1 may ask what produced the difference. No gate treats
   the low number as a defect.
 
-Neither column is scheduled. **Neither is a condition of any gate here, this
-spec does not start either, and no ticket may be cut for either until a benefit
-test is written and passed.**
+Neither column is scheduled, and neither is a condition of any gate here.
+
+**The benefit test for `client` is not new work.** It is Gate A's own three
+questions, committed before any data was seen, re-run unchanged after the column
+lands. `orbit/specs/0004-the-client-column.md` builds the instrument and
+`orbit/tickets/17-a-surface-says-which-client-pays-for-it.md` is the unit of
+work; neither closes the gate, and reading the result stays Dylan's. Writing a
+different rule now would be pre-registering after seeing the data, which is the
+move both gates exist to stop.
 
 ## 4. The Sandcastle material, and the standing it has
 

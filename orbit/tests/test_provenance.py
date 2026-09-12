@@ -385,14 +385,36 @@ class TestThisRepository(unittest.TestCase):
         self.assertGreaterEqual(len(crossing), 28)
 
     def test_no_file_here_is_reported_as_an_artifact_of_a_producer(self):
-        # Zero producers on a repository whose identity pairs all have one is
-        # the ticket's own finding, and it is a true one: nothing in this tree
-        # declares its provenance in a header, a manifest or a write path.
-        # A number above zero here is a claim, and it has to be checked by hand
-        # before it is believed.
+        # This read zero until 2026-09-12, and the comment then said a number
+        # above zero is a claim to be checked by hand before it is believed.
+        # Two arrived that day, together, and both were checked. Both are false.
+        #
+        # Writing a `CLAUDE.md` for this repository -- it had none -- made two
+        # test fixtures resolve that had never resolved before. Each builds a
+        # `CLAUDE.md` inside a temporary directory:
+        #
+        #     (root / "CLAUDE.md").write_text(body, encoding="utf-8")
+        #
+        # The write path is real and the detector reads it correctly. What it
+        # cannot see is that `root` is a tmpdir, so it matches the basename to
+        # the only `CLAUDE.md` indexed here and reports a test as the producer
+        # of this repository's instruction surface. No test writes that file.
+        #
+        # Recorded rather than repaired, on ticket 07's rule for the 157-row
+        # link-display-text class: repairing this moves the detector set from
+        # `1.8eabab386316`, and a moved detector set makes every figure in
+        # tickets 07 and 14 incomparable with the ones they were taken against.
+        # The finding is a condition of the detector meeting a tmpdir, not a
+        # statement about either test.
+        #
+        # Named exactly, so the guard still fails on a production that is not
+        # one of these two. That is the whole point of listing them rather than
+        # relaxing the assertion to "few enough".
         self.assertEqual(
-            [(one.producer_path, one.artifact_path) for one in self.productions],
-            [],
+            sorted((one.producer_path, one.artifact_path)
+                   for one in self.productions),
+            [("orbit/tests/test_addressing.py", "CLAUDE.md"),
+             ("orbit/tests/test_provenance.py", "CLAUDE.md")],
         )
 
     def test_every_pair_is_reported_with_its_provenance_count(self):
