@@ -76,7 +76,39 @@ UNMATCHED_SHARE_CEILING = 0.33
 # So: the one evidence record that quotes other repositories, and every other
 # ticket stays in the population. A later acceptance run adds its report here,
 # and only if it too audits repositories that are not this one.
-EVIDENCE_RECORDS = ("orbit/tickets/07-audit-and-gates.md",)
+# Episode reconstructions, added 2026-09-12 on the rule spec 0003 F6
+# pre-registered before any of them landed: a Gate 1 fixture "has to say, at the
+# time it lands, how its addresses are held -- as an evidence record on the same
+# rule ticket 07 was granted, or by carrying the addresses outside this
+# repository's prose. Lowering the ceiling to fit is refitting, which the guard
+# exists to stop."
+#
+# They are held here, on ticket 07's rule, and the ceiling is untouched.
+#
+# Why they belong: an episode reconstructs a failure that happened in another
+# repository, so it quotes that repository's paths by its nature --
+# `.claude/hooks/block-dangerous-git.py` and `GIT-WORKFLOW.md` in Home-system,
+# `observations/concurrent-sessions.md` in Estimating-Lab. None can resolve
+# here, by definition, and each was read correctly where it was read.
+#
+# Readings when the first record landed, both recorded so neither is hidden:
+#   whole tree                    117 of 373  31.4%   (6 addresses of headroom)
+#   with episode 01 excluded       99 of 355  27.9%   (18)
+# The record added 18 unmatched addresses and 18 to the denominator; 32 of the
+# 50 it names were already in the population from other files. Two further
+# reconstructions were in flight when this was written, and on the whole-tree
+# reading they would have breached -- which is F6 coming true on schedule
+# rather than a surprise.
+#
+# The bar for joining this tuple is ticket 07's: the file audits or reconstructs
+# something that is not this repository. A file that quotes this repository's
+# own paths stays in the population, because that is the detector behaviour the
+# ceiling exists to watch.
+EVIDENCE_RECORDS = (
+    "orbit/tickets/07-audit-and-gates.md",
+    "orbit/evidence/episode-01-cross-session-amend-collision.md",
+    "orbit/evidence/episode-03-gates-reinterpreted-after-the-data.md",
+)
 
 
 class TestBoundaries(unittest.TestCase):
