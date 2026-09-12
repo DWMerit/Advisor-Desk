@@ -103,10 +103,19 @@ CLIENT_RELATIVE_PATHS: dict[str, str] = {
     ".mcp.json": CLIENT_CLAUDE,
 }
 
-# Matched on a directory prefix, at any depth below it. A vendor's own
-# directory is the statement -- everything the estate put inside `.claude/`, a
-# settings file, an agent, a command, a skill or a hook script a settings file
-# names, is there because a Claude session reads that directory.
+# Matched on a directory prefix at the repository root, at any depth below it.
+# A vendor's own directory is the statement -- everything the estate put inside
+# `.claude/`, a settings file, an agent, a command, a skill or a hook script a
+# settings file names, is there because a Claude session reads that directory.
+#
+# **Rooted, the way `surfaces.SURFACE_DIRECTORIES` is rooted.** A first version
+# also matched `.claude/` nested anywhere below the root. Across the four
+# repositories ticket 07 audited it claimed no row that the rules here do not
+# already claim by name, so it was reach without a reading behind it -- the same
+# ground on which `DIRECTIVE_HEADING_WORDS` holds one word rather than every
+# word a heading could open with. A repository that nests a vendor directory has
+# no rows *found* by this rule, which is not the same statement as no rows, and
+# adding the case means looking at such a repository first.
 CLIENT_DIRECTORIES: tuple[tuple[str, str], ...] = (
     (".claude/", CLIENT_CLAUDE),
     (".cursor/", CLIENT_CURSOR),
@@ -143,7 +152,7 @@ def attribute(relative_path: str) -> tuple[str, str]:
         return client, REASON_VENDOR_RELATIVE_PATH
 
     for prefix, directory_client in CLIENT_DIRECTORIES:
-        if posix.startswith(prefix) or f"/{prefix}" in posix:
+        if posix.startswith(prefix):
             return directory_client, REASON_VENDOR_DIRECTORY
 
     client = CLIENT_BASENAMES.get(PurePosixPath(posix).name)

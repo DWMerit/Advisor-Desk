@@ -733,8 +733,9 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
     edge_rows.extend(_produces_edges(produces, repo, productions))
 
     result.ladders = _ladder_tally(rung_rows, rungs_without_a_base)
-    result.recognition = _recognition_tally(rows.values())
-    result.client = _client_tally(rows.values())
+    result.recognition = _split(rows.values(), "recognition",
+                                surfaces.RECOGNITION_KINDS)
+    result.client = _split(rows.values(), "client", clients.CLIENT_KINDS)
     result.files_walked = len(walked)
     result.bytes_walked = surfaces.bytes_walked(walked)
     # Distinct paths, not rows. A settings file is one file however many hooks
@@ -787,46 +788,30 @@ def _external_totals(results: list[RepoResult]) -> dict[str, int]:
     return totals
 
 
-def _recognition_tally(rows) -> dict:
-    """Surfaces per recognition value, every value present even at zero.
+def _split(rows, column: str, values) -> dict:
+    """Surfaces per value of one column, every value present even at zero.
 
-    Present at zero on purpose. A repository with no inferred rows and a
+    The surface count is printed with two splits under it -- ``recognition``,
+    how the tool came to call a file a surface, and ``client``, whose naming
+    claims it -- and both are this one shape.
+
+    **Present at zero on purpose.** A repository with no inferred rows and a
     repository the inference was never applied to read the same if the key is
-    simply absent, and they are not the same thing.
-
-    Counted over rows that indexed, which is what ``surfaces`` beside it counts.
-    A candidate that could not be read still becomes a row carrying its reason,
-    and folding those in here would print a split that does not add up to the
-    total it sits next to.
-    """
-    tally = {value: 0 for value in surfaces.RECOGNITION_KINDS}
-    for row in rows:
-        if row.get("reason"):
-            continue
-        value = row.get("recognition")
-        if value in tally:
-            tally[value] += 1
-    return tally
-
-
-def _client_tally(rows) -> dict:
-    """Surfaces per client, UNKNOWN among them and never omitted.
-
-    Every value present even at zero, for the reason ``_recognition_tally``
-    gives -- and UNKNOWN most of all. A repository whose surfaces nothing names
-    and a repository the derivation was never run against read the same if the
-    key is simply absent, and a count of attributed surfaces printed without its
+    simply absent, and they are not the same thing. The same holds hardest for
+    ``client``'s UNKNOWN: a count of attributed surfaces printed without its
     UNKNOWN bucket is a cold-start bill with two-thirds of the estate left off
     it.
 
-    Counted over rows that indexed, which is what ``surfaces`` beside it counts,
-    so the split sums to the total it is printed next to.
+    **Counted over rows that indexed**, which is what ``surfaces`` beside it
+    counts, so each split sums to the total it sits next to. A candidate that
+    could not be read still becomes a row carrying its reason, and folding
+    those in would print a split that does not add up.
     """
-    tally = {value: 0 for value in clients.CLIENT_KINDS}
+    tally = {value: 0 for value in values}
     for row in rows:
         if row.get("reason"):
             continue
-        value = row.get("client")
+        value = row.get(column)
         if value in tally:
             tally[value] += 1
     return tally
@@ -855,19 +840,11 @@ def _ladder_totals(results: list[RepoResult]) -> dict:
     }
 
 
-def _recognition_totals(results: list[RepoResult]) -> dict:
-    """The same tally across every repository this run indexed."""
+def _split_totals(results: list[RepoResult], attribute: str, values) -> dict:
+    """One repository's split, summed across every repository this run indexed."""
     return {
-        value: sum(result.recognition.get(value, 0) for result in results)
-        for value in surfaces.RECOGNITION_KINDS
-    }
-
-
-def _client_totals(results: list[RepoResult]) -> dict:
-    """The same tally across every repository this run indexed."""
-    return {
-        value: sum(result.client.get(value, 0) for result in results)
-        for value in clients.CLIENT_KINDS
+        value: sum(getattr(result, attribute).get(value, 0) for result in results)
+        for value in values
     }
 
 
@@ -1019,8 +996,9 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
         "graph": {
             "repositories": len(results),
             "surfaces": sum(result.surfaces for result in results),
-            "recognition": _recognition_totals(results),
-            "client": _client_totals(results),
+            "recognition": _split_totals(results, "recognition",
+                                         surfaces.RECOGNITION_KINDS),
+            "client": _split_totals(results, "client", clients.CLIENT_KINDS),
             "clauses": sum(result.clauses for result in results),
             "edges": sum(result.edges for result in results),
             "pointers": sum(result.pointers for result in results),

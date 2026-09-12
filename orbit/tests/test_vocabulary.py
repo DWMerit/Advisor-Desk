@@ -16,7 +16,8 @@ from . import support  # noqa: F401
 
 from build_estate import build
 from orbit_context import (
-    clauses, detectors, pointers, provenance, repomap, settings, surfaces,
+    clauses, clients, detectors, pointers, provenance, repomap, settings,
+    surfaces,
 )
 from orbit_context.indexer import index
 from orbit_context.ontology import load
@@ -67,6 +68,20 @@ class TestVocabulary(unittest.TestCase):
         # tool's words rather than the estate's.
         for kind in surfaces.RECOGNITION_KINDS:
             self.assertEqual(offending_words(kind), [], kind)
+
+    def test_client_kinds(self):
+        # Written to a column and printed beside every count, so they are this
+        # tool's words rather than the estate's. UNKNOWN among them: it is a
+        # value the tool chose, not an absence.
+        for kind in clients.CLIENT_KINDS:
+            self.assertEqual(offending_words(kind), [], kind)
+
+    def test_client_reasons(self):
+        # Written to a column of their own, and the half of the pair a reader
+        # goes to when the value is UNKNOWN. Each says what the value rests on,
+        # and none of them names a defect.
+        for reason in clients.CLIENT_REASONS:
+            self.assertEqual(offending_words(reason), [], reason)
 
     def test_hook_command_resolutions(self):
         for name in dir(settings):

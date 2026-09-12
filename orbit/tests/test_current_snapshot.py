@@ -44,7 +44,7 @@ from orbit_context.ontology import load
 # which rows an answer covers; the five hashed detector modules decide what is
 # recognised, and this work touches none of them. Asserted rather than stated in
 # prose: a figure moving after this date is not attributable to this change.
-DETECTOR_SET_VERSION = "1.8eabab386316"
+DETECTOR_SET_VERSION = support.DETECTOR_SET_VERSION
 
 
 class SnapshotTestCase(unittest.TestCase):

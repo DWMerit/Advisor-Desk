@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from . import support  # noqa: F401
+from . import support
 
 from build_estate import build as build_phase_one
 from build_lineage import build as build_lineage
@@ -56,7 +56,7 @@ class TestTheDetectorSetDidNotMove(unittest.TestCase):
     """
 
     def test_the_version_is_the_one_the_spec_was_written_against(self):
-        self.assertEqual(detectors.VERSION, "1.8eabab386316")
+        self.assertEqual(detectors.VERSION, support.DETECTOR_SET_VERSION)
 
     def test_the_derivation_is_not_in_the_hashed_set(self):
         # Stated as an assertion rather than as a comment: adding `clients` to
