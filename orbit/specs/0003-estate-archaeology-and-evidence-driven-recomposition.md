@@ -22,6 +22,37 @@ observation acquires standing by being quoted here. Where this document says
 "the program", it means the sequence of gates in §5 to §9 — a route for finding
 things out, not a rule anyone in the estate is being asked to follow.
 
+### 0.1 Where work is tracked, and what that does not confer
+
+**GitHub Issues on `DWMerit/Advisor-Desk` is the current tracker.** All new work
+governed through Advisor-Desk is opened there. `docs/agents/issue-tracker.md`
+records how it is reached, and that the route differs between a local machine
+and a remote session.
+
+**`orbit/tickets/` is a legacy record.** Eighteen files at head `6a772fa`,
+numbered `00` through `17`, written under a home-built imitation of these
+workflows before a tracker was configured. They are preserved as historical
+evidence and are not migrated, archived, rewritten or deleted. **No new ticket
+is created there.**
+
+**The coexistence is itself evidence, and it is evidence of drift rather than of
+two authorities.** A repository holding two places where work is described is
+the condition this program exists to reconstruct in other repositories, and it
+now holds one of its own. Recorded here so that a later reader finds the
+condition named rather than inferring that both were meant to be live.
+
+**Task-specific authority is progressively disclosed through the active ticket,
+its governing spec, and an explicitly invoked workflow.** These sources may
+govern together at different levels. Direct human instructions and runtime
+constraints still apply. File location, recency, and confident wording do not
+independently confer task authority.
+
+**Orbit observes this structure and does not decide it.** Orbit may observe
+declarations, pointers, loading relationships, and the surfaces active in a
+session. It does not decide effective authority, trust, precedence, or
+permission. Those determinations belong to the separately loaded
+workflow/authority layer.
+
 ## 1. Goal
 
 Decompose and recompose the estate from evidence that already exists — Git
@@ -37,6 +68,22 @@ Four things have to be true of any eventual design, and each is a gate below:
 
 The program produces **decisions and evidence packages**. The target
 architecture is downstream of all five gates and is out of scope here (§10).
+
+### 1.1 The immediate destination
+
+Ahead of every gate below, and bounding them:
+
+1. **Orbit is reliably usable on the local estate.** The store scopes to one
+   snapshot, a documented query runs as written, and a figure read back is a
+   figure of something that exists at once.
+2. **The minimum evidence-backed recomposition needed to resume estimating
+   work**, and no more than that.
+
+**Neither is a licence to widen.** Repository cleanup, governance redesign and
+hot-context architecture are not prerequisites for estimating, and none of them
+becomes one unless historical evidence shows it blocking estimating work. A gate
+below that starts to require one has stopped serving this destination and is
+answering a question nobody asked.
 
 ## 2. Program Gate 0 — the disposition
 
@@ -288,11 +335,17 @@ Episodes 1 and 2 come from the report's eight recommendations. Episode 3 was
 observed in this program, not in the report, so the Gate 1 backlog is **nine**:
 the report's eight, plus this one.
 
-**The anchors the report supplies for the first two** are Estimating-Lab
-`077776de` and Home-system `5ffc8bfb`, with the chain around each set out in the
-report. They are starting addresses for a reconstruction, not the
-reconstruction: a fixture is built from the evidence around a commit, not from
-the commit's own message.
+**The anchors the report supplies for the first two**, each named beside its own
+episode rather than left to be paired by position:
+
+| # | Episode | Anchor |
+|---|---|---|
+| 1 | Cross-session `git commit --amend` collision | Estimating-Lab `077776de` |
+| 2 | A pricing review that exited successfully after pricing nothing | Home-system `5ffc8bfb` |
+
+The chain around each is set out in the report. They are starting addresses for
+a reconstruction, not the reconstruction: a fixture is built from the evidence
+around a commit, not from the commit's own message.
 
 The six remaining recommended episodes, instantiated after the first three:
 
@@ -431,6 +484,19 @@ No gate before this one grants permission to move anything.
   gate opening is a decision recorded, not a change made.
 - **No new governance mechanism built solely to operate this program.** If the
   program needs a registry to run, that is a finding about the program.
+- **No agent-facing hot-context system.** Building retrieval or hydration that
+  assembles context for an agent, at session start or on demand, is a later
+  layer. It is also a one-way door with respect to measurement: a mechanism that
+  delivers context changes the cold-start cost before the cost has been read.
+  Orbit is itself an indexed context graph, and querying it is not what this
+  excludes.
+- **No additional authority machinery.** No registry of what governs what, no
+  authority projection, no precedence scheme. §0.1 states how authority is
+  disclosed, and stating it is the whole of the work this program does on it.
+- **No production transcript-mining, transcript-to-skill or video-to-skill
+  system.** Historical session records **may** be inspected as Gate 1
+  archaeological evidence, and episode 9 is about one. What is out of scope is
+  building a system that mines them as a product.
 
 ## 11. Operating rules that hold across every gate
 
