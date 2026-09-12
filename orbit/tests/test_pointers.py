@@ -107,6 +107,7 @@ UNMATCHED_SHARE_CEILING = 0.33
 EVIDENCE_RECORDS = (
     "orbit/tickets/07-audit-and-gates.md",
     "orbit/evidence/episode-01-cross-session-amend-collision.md",
+    "orbit/evidence/episode-02-pricing-review-exited-zero.md",
     "orbit/evidence/episode-03-gates-reinterpreted-after-the-data.md",
 )
 
