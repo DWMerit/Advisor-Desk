@@ -45,6 +45,16 @@ _WRAPPERS = re.compile(r"^(LowCardinality|Nullable)\((.*)\)$")
 STORE_TABLE_PREFIX = "gl_context_"
 CURRENT_VIEW_PREFIX = "current_"
 
+
+def current_view_name(table: str) -> str:
+    """The current-snapshot view over one table: the whole naming rule, once.
+
+    Spelled here rather than at each call site, so a view name is always derived
+    from its table's and the two cannot drift apart.
+    """
+    return CURRENT_VIEW_PREFIX + table.removeprefix(STORE_TABLE_PREFIX)
+
+
 # The snapshot every context row carries: one repository at one commit on one
 # branch. It is the key the store replaces rows on and the key a current-snapshot
 # view joins by, so it is declared here with the tables rather than in either.
@@ -102,7 +112,7 @@ class TableShape:
     @property
     def current_view(self) -> str:
         """The name of this table's current-snapshot view."""
-        return CURRENT_VIEW_PREFIX + self.table.removeprefix(STORE_TABLE_PREFIX)
+        return current_view_name(self.table)
 
     def create_current_view_sql(self, snapshot_view: str) -> str:
         """This table's rows at the snapshot each repository is currently at.

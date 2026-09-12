@@ -32,12 +32,12 @@ Two things about that command, both measured rather than assumed:
   small plausible number rather than an error. A query written against a
   `current_` view cannot: no such view exists there, so it fails and names the
   table it could not find.
-- **The store keeps every run ever indexed.** Ask a `current_` view —
-  `current_surface`, `current_clause`, `current_edge`, and `current_run` for
-  which snapshot that was — or the answer is several runs added together. The
-  `gl_context_*` tables underneath are every run at once, which is the right
-  question only when comparing snapshots. `orbit/README.md` carries the views
-  and every other query idiom.
+- **The store keeps every run ever indexed.** Ask a `current_` view — any
+  `gl_context_*` table's name with that prefix traded for `current_` — or the
+  answer is several runs added together. The tables underneath are every run at
+  once, which is the right question only when comparing snapshots.
+  `orbit/README.md` carries the views and every other query idiom, and an index
+  run prints the ones it declared.
 
 ## What work exists, and its state — ask the tracker
 

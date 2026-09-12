@@ -132,9 +132,12 @@ So each table has a `current_` view beside it, declared on every index run:
 orbit local sql --db ~/.orbit-context/context.duckdb \
   "SELECT count(*) FROM current_surface"
 
-# Which snapshot that was, and how many runs the store holds beside it.
+# Which snapshot that was, how many runs this repository has behind it, and how
+# many the whole file holds.
 orbit local sql --db ~/.orbit-context/context.duckdb \
-  "SELECT path, branch, commit_sha, indexed_at, runs_in_store FROM current_run"
+  "SELECT path, branch, commit_sha, indexed_at,
+          runs_of_this_repository, runs_in_store
+     FROM current_run"
 ```
 
 Three things follow from this being a view rather than a rule to remember:
@@ -144,7 +147,10 @@ Three things follow from this being a view rather than a rule to remember:
   was indexed last and return nothing for the others.
 - **The rows carry their own snapshot key**, so a figure can be quoted with its
   provenance without a second query: `SELECT branch, commit_sha, count(*) FROM
-  current_surface GROUP BY 1, 2`.
+  current_surface GROUP BY 1, 2`. `current_run` adds two counts beside it —
+  `runs_of_this_repository`, which is what an unscoped count of this
+  repository's rows would have summed, and `runs_in_store`, every run row in
+  the file.
 - **A `current_` view exists in no graph but this one.** Run without `--db`
   against Orbit's own store, `SELECT count(*) FROM current_surface` cannot return
   a plausible number — it fails, and names the table it could not find. That is
@@ -152,8 +158,18 @@ Three things follow from this being a view rather than a rule to remember:
 
 **Asking across runs is still possible, and is now the long query.** The base
 tables are untouched: `gl_context_surface` remains every run ever indexed, which
-is the right question when comparing snapshots, and the wrong one otherwise. The
-examples below read the current snapshot, so they name the views.
+is the right question when comparing snapshots, and the wrong one otherwise. A
+query that means to span runs says so in its own first line, so that a reader
+meeting it in isolation can tell it apart from one that spans them by accident:
+
+```sh
+orbit local sql --db ~/.orbit-context/context.duckdb \
+  "-- across runs, deliberately
+   SELECT branch, commit_sha, count(*) AS surfaces
+     FROM gl_context_surface GROUP BY 1, 2 ORDER BY 1, 2"
+```
+
+The examples below all read the current snapshot, so they name the views.
 
 ```sh
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT surface_kind, name, path, size_bytes FROM current_surface

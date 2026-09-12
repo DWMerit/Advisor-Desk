@@ -18,7 +18,12 @@ from pathlib import Path
 
 import duckdb
 
-from .ontology import SNAPSHOT_KEY, TableShape
+from .ontology import (
+    SNAPSHOT_KEY,
+    STORE_TABLE_PREFIX,
+    TableShape,
+    current_view_name,
+)
 
 DEFAULT_DB_PATH = Path(os.path.expanduser("~/.orbit-context/context.duckdb"))
 
@@ -28,7 +33,9 @@ ORBIT_GRAPH_PATH = Path(os.path.expanduser("~/.orbit/graph.duckdb"))
 # Orbit's own tables. Guarded so a mistake here fails loudly instead of
 # corrupting the code graph.
 ORBIT_OWNED_PREFIXES = ("gl_", "_orbit_")
-CONTEXT_PREFIX = "gl_context_"
+# The prefix on every table this indexer writes, spelled in the ontology because
+# that is where the tables are declared.
+CONTEXT_PREFIX = STORE_TABLE_PREFIX
 
 
 class StoreError(Exception):
@@ -294,8 +301,9 @@ RUN_TABLE = "gl_context_run"
 
 # The view naming the snapshot each repository is currently at. Every other
 # current view joins to it, and it is the one a reader asks which snapshot an
-# answer came from.
-SNAPSHOT_VIEW = "current_run"
+# answer came from. Named by the same rule as every other view rather than
+# written out, so the run table and its view cannot come to disagree.
+SNAPSHOT_VIEW = current_view_name(RUN_TABLE)
 
 
 def assert_local_view(name: str) -> None:
@@ -325,9 +333,20 @@ def snapshot_view_sql() -> str:
     a store holds several repositories by design, and one global newest would
     answer for whichever was indexed last and return nothing for the others.
 
-    ``runs_in_store`` rides along because how many runs the store holds is the
-    whole question behind an unscoped figure: a repository sitting on one run
-    reads the same either way, and one sitting on eight does not.
+    Two counts ride along, because how many runs sit behind an unscoped figure is
+    the whole question the views exist to answer, and the two answer it about
+    different things. ``runs_of_this_repository`` is what an unscoped count of
+    this repository's rows would have summed -- one run reads the same either
+    way, eight does not. ``runs_in_store`` is every run row in the file,
+    this repository's and every other's.
+
+    The ordering is ``indexed_at`` descending, and the two columns after it are a
+    tiebreak rather than a second reading of time: two runs of one repository can
+    only share an ``indexed_at`` if they were written before this column kept its
+    microseconds, and nothing in those rows says which of them ran first. So the
+    tiebreak is deterministic and not meaningful, it is reachable only by rows
+    predating that change, and the next index run of that repository settles it
+    for good.
 
     Written as ``r.*`` with the ordering column excluded again, so a column added
     to the run table appears here without a second edit.
@@ -337,7 +356,9 @@ def snapshot_view_sql() -> str:
         f"CREATE OR REPLACE VIEW {SNAPSHOT_VIEW} AS\n"
         f"SELECT * EXCLUDE (recency) FROM (\n"
         f"  SELECT r.*,\n"
-        f"         count(*) OVER (PARTITION BY {repository}) AS runs_in_store,\n"
+        f"         count(*) OVER (PARTITION BY {repository})\n"
+        f"           AS runs_of_this_repository,\n"
+        f"         count(*) OVER () AS runs_in_store,\n"
         f"         row_number() OVER (PARTITION BY {repository}\n"
         f"                            ORDER BY r.indexed_at DESC,\n"
         f"                                     r.commit_sha DESC, r.branch DESC)\n"
@@ -354,6 +375,12 @@ def declare_views(connection, shapes) -> list[str]:
     yesterday's column list is the failure this is meant to remove: a reader who
     never opens the README still gets an answer, so the answer has to be right
     without anyone having remembered to refresh it.
+
+    The run table's view is built here and every other table's in the ontology,
+    beside the shape it scopes. That is not a seam papered over: the others are
+    one table filtered to the current snapshot, and this one is what says which
+    snapshot that is. Which run is current is the store's question, and the
+    ontology declares table shapes.
     """
     shapes = list(shapes)
     assert_local_view(SNAPSHOT_VIEW)
@@ -361,6 +388,7 @@ def declare_views(connection, shapes) -> list[str]:
     declared = [SNAPSHOT_VIEW]
     for shape in shapes:
         if shape.table == RUN_TABLE:
+            # Declared above, as the snapshot every other view joins to.
             continue
         assert_local_view(shape.current_view)
         connection.execute(shape.create_current_view_sql(SNAPSHOT_VIEW))
