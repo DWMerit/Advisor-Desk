@@ -60,3 +60,20 @@ breaches, the answer is never to raise the ceiling.
 
 Specs and tickets are not loaded by any session. A rule that matters at session
 open belongs in this file; a rule written only in a ticket is read by nobody.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `DWMerit/Advisor-Desk`. `gh` works locally; remote sessions use
+the GitHub MCP tools. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context, and neither file exists yet by design. See
+`docs/agents/domain.md`.
