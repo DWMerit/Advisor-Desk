@@ -29,11 +29,15 @@ Two things about that command, both measured rather than assumed:
 
 - **`--db` is not optional.** Without it, `orbit local sql` opens GitLab Orbit's
   own graph, finds a table of the same name, and answers from it — returning a
-  small plausible number rather than an error.
-- **The store keeps every run ever indexed.** Scope to one snapshot on
-  `(project_id, branch, commit_sha)` before reading any figure as current, or
-  the answer is several runs added together. `orbit/README.md` carries the
-  clause and every other query idiom.
+  small plausible number rather than an error. A query written against a
+  `current_` view cannot: no such view exists there, so it fails and names the
+  table it could not find.
+- **The store keeps every run ever indexed.** Ask a `current_` view —
+  `current_surface`, `current_clause`, `current_edge`, and `current_run` for
+  which snapshot that was — or the answer is several runs added together. The
+  `gl_context_*` tables underneath are every run at once, which is the right
+  question only when comparing snapshots. `orbit/README.md` carries the views
+  and every other query idiom.
 
 ## What work exists, and its state — ask the tracker
 

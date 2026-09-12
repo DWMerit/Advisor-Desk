@@ -106,74 +106,107 @@ repository the same query returned **3 rows** unpointed and **495** pointed. A
 plausible small number is the worst possible wrong answer, because nothing about
 it looks wrong.
 
-**And scope to one snapshot.** The store holds every run ever indexed, keyed by
-`(project_id, branch, commit_sha)` — the same key `orbit/orbit_context/store.py`
-replaces rows on. The 495 above is five runs summed; the current snapshot holds
-**117**. An unscoped `count(*)` answers "every run ever", which is not a
-statement about the estate. The examples below are written unscoped to keep them
-readable — add the snapshot clause before reading any figure as current:
+**And ask the current snapshot, which is a view.** The store holds every run
+ever indexed, keyed by `(traversal_path, project_id, branch, commit_sha)` — the
+same key `orbit/orbit_context/store.py` replaces rows on. The 495 above is five
+runs summed; the snapshot that exists holds **117**. An unscoped `count(*)` on a
+base table answers "every run ever", which is not a statement about any estate,
+and the error grows on its own: every session indexes, and nothing has to go
+wrong for the number to drift further from the truth. Both figures were taken
+before the views existed and at a store holding five runs; a figure retaken now
+comes from the other side of this change and is not comparable with them.
+
+So each table has a `current_` view beside it, declared on every index run:
+
+| view | the table under it |
+|---|---|
+| `current_surface` | `gl_context_surface` |
+| `current_clause` | `gl_context_clause` |
+| `current_edge` | `gl_context_edge` |
+| `current_external_ref` | `gl_context_external_ref` |
+| `current_coverage` | `gl_context_coverage` |
+| `current_run` | `gl_context_run`, and the view every other one joins to |
 
 ```sh
+# The whole query. No join to remember, and the answer is one commit's.
 orbit local sql --db ~/.orbit-context/context.duckdb \
-  "SELECT count(*) FROM gl_context_surface s
-     JOIN (SELECT project_id, branch, commit_sha
-             FROM gl_context_run ORDER BY indexed_at DESC LIMIT 1) r
-       ON s.project_id = r.project_id AND s.branch = r.branch
-      AND s.commit_sha = r.commit_sha"
+  "SELECT count(*) FROM current_surface"
+
+# Which snapshot that was, and how many runs the store holds beside it.
+orbit local sql --db ~/.orbit-context/context.duckdb \
+  "SELECT path, branch, commit_sha, indexed_at, runs_in_store FROM current_run"
 ```
 
+Three things follow from this being a view rather than a rule to remember:
+
+- **Current is per repository.** One store holds several repositories, and each
+  gets its own newest run — not one global winner that would answer for whichever
+  was indexed last and return nothing for the others.
+- **The rows carry their own snapshot key**, so a figure can be quoted with its
+  provenance without a second query: `SELECT branch, commit_sha, count(*) FROM
+  current_surface GROUP BY 1, 2`.
+- **A `current_` view exists in no graph but this one.** Run without `--db`
+  against Orbit's own store, `SELECT count(*) FROM current_surface` cannot return
+  a plausible number — it fails, and names the table it could not find. That is
+  the whole mitigation for the paragraph above.
+
+**Asking across runs is still possible, and is now the long query.** The base
+tables are untouched: `gl_context_surface` remains every run ever indexed, which
+is the right question when comparing snapshots, and the wrong one otherwise. The
+examples below read the current snapshot, so they name the views.
+
 ```sh
-orbit local sql --db ~/.orbit-context/context.duckdb "SELECT surface_kind, name, path, size_bytes FROM gl_context_surface
+orbit local sql --db ~/.orbit-context/context.duckdb "SELECT surface_kind, name, path, size_bytes FROM current_surface
                  ORDER BY size_bytes DESC"
 
 # What a cold session pays for skills, against what the files weigh.
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT sum(frontmatter_bytes) AS boot, sum(size_bytes) AS total
-                 FROM gl_context_surface WHERE surface_kind = 'skill-package'"
+                 FROM current_surface WHERE surface_kind = 'skill-package'"
 
 # Every hook, where it is defined, and where its command goes.
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT path || ':' || start_line AS locator, name, matcher,
                         target_resolution, target_path
-                 FROM gl_context_surface
+                 FROM current_surface
                  WHERE surface_kind = 'hook-definition' ORDER BY locator"
 
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT c.path, c.surface_kind, c.size_bytes, f.language
-                 FROM gl_context_surface c
+                 FROM current_surface c
                  JOIN gl_file f ON f.path = c.path AND f.project_id = c.project_id
                  ORDER BY c.size_bytes DESC"
 
 # Every rule in an instruction surface, with its address and what it weighs.
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT fqn, end_byte - start_byte AS bytes, start_line
-                 FROM gl_context_clause
+                 FROM current_clause
                  WHERE surface_path = 'CLAUDE.md' AND clause_type = 'list-rule'
                  ORDER BY bytes DESC"
 
 # How deep the nesting goes, walked over CONTAINS.
 orbit local sql --db ~/.orbit-context/context.duckdb "WITH RECURSIVE walk(id, depth) AS (
-                   SELECT target_id, 1 FROM gl_context_edge
+                   SELECT target_id, 1 FROM current_edge
                     WHERE relationship_kind = 'CONTAINS' AND source_kind = 'Surface'
                    UNION ALL
                    SELECT e.target_id, walk.depth + 1
-                     FROM gl_context_edge e JOIN walk ON e.source_id = walk.id
+                     FROM current_edge e JOIN walk ON e.source_id = walk.id
                     WHERE e.relationship_kind = 'CONTAINS' AND e.source_kind = 'Clause')
                  SELECT c.surface_path, max(walk.depth) AS deepest
-                 FROM walk JOIN gl_context_clause c ON c.id = walk.id
+                 FROM walk JOIN current_clause c ON c.id = walk.id
                  GROUP BY 1 ORDER BY 2 DESC"
 
 # The three negative findings, kept apart. One row per address, not per mention.
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT sub_kind, count(*) AS addresses
-                 FROM gl_context_external_ref GROUP BY 1 ORDER BY 2 DESC"
+                 FROM current_external_ref GROUP BY 1 ORDER BY 2 DESC"
 
 # Which rule points where, with the locator and whether it sat in a fenced block.
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT source_path || ':' || source_line AS locator, subtype,
                         target_address, target_kind, target_path, in_code_fence
-                 FROM gl_context_edge
+                 FROM current_edge
                  WHERE relationship_kind = 'REFERENCES' ORDER BY locator"
 
 # Every address named in the estate that no file here matches, and who names it.
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT x.address, count(*) AS mentions,
                         min(e.source_path || ':' || e.source_line) AS first_written
-                 FROM gl_context_external_ref x
-                 JOIN gl_context_edge e ON e.target_id = x.id
+                 FROM current_external_ref x
+                 JOIN current_edge e ON e.target_id = x.id
                  WHERE x.sub_kind = 'no-indexed-target-match'
                  GROUP BY 1 ORDER BY 2 DESC"
 
@@ -182,8 +215,8 @@ orbit local sql --db ~/.orbit-context/context.duckdb "SELECT x.address, count(*)
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT i.source_path, i.target_path, p.subtype AS evidence,
                         p.source_path AS producer,
                         p.evidence_path || ':' || p.evidence_line AS evidenced_at
-                 FROM gl_context_edge i
-                 LEFT JOIN gl_context_edge p
+                 FROM current_edge i
+                 LEFT JOIN current_edge p
                    ON p.relationship_kind = 'PRODUCES'
                   AND p.project_id = i.project_id
                   AND p.target_path IN (i.source_path, i.target_path)
@@ -194,8 +227,8 @@ orbit local sql --db ~/.orbit-context/context.duckdb "SELECT i.source_path, i.ta
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT count(*) AS pairs,
                         count(*) FILTER (WHERE producer IS NOT NULL) AS with_provenance
                  FROM (SELECT i.source_path, max(p.source_path) AS producer
-                       FROM gl_context_edge i
-                       LEFT JOIN gl_context_edge p
+                       FROM current_edge i
+                       LEFT JOIN current_edge p
                          ON p.relationship_kind = 'PRODUCES'
                         AND p.project_id = i.project_id
                         AND p.target_path IN (i.source_path, i.target_path)
@@ -206,14 +239,14 @@ orbit local sql --db ~/.orbit-context/context.duckdb "SELECT count(*) AS pairs,
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT subtype AS evidence, source_path AS producer,
                         target_path AS artifact, source_address AS named_as,
                         evidence_path || ':' || evidence_line AS evidenced_at
-                 FROM gl_context_edge
+                 FROM current_edge
                  WHERE relationship_kind = 'PRODUCES' ORDER BY subtype, artifact"
 
 # What the estate declares superseded, beside the surface that still loads.
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT e.source_path || ':' || e.source_line AS claimed_at,
                         e.target_address, s.surface_kind, s.size_bytes
-                 FROM gl_context_edge e
-                 LEFT JOIN gl_context_surface s
+                 FROM current_edge e
+                 LEFT JOIN current_surface s
                    ON s.path = e.target_path AND s.project_id = e.project_id
                  WHERE e.subtype = 'supersedes-claim'"
 ```
@@ -889,12 +922,12 @@ one rung short of itself:
 orbit local sql --db ~/.orbit-context/context.duckdb "SELECT r.ladder, s.path, s.size_bytes, r.rung
                  FROM (SELECT target_path AS ladder, source_path AS path, subtype AS rung,
                               project_id, branch, commit_sha
-                         FROM gl_context_edge WHERE relationship_kind = 'RUNG_OF'
+                         FROM current_edge WHERE relationship_kind = 'RUNG_OF'
                        UNION
                        SELECT target_path, target_path, 'base',
                               project_id, branch, commit_sha
-                         FROM gl_context_edge WHERE relationship_kind = 'RUNG_OF') r
-                 JOIN gl_context_surface s
+                         FROM current_edge WHERE relationship_kind = 'RUNG_OF') r
+                 JOIN current_surface s
                    ON s.path = r.path AND s.project_id = r.project_id
                   AND s.branch = r.branch AND s.commit_sha = r.commit_sha
                  ORDER BY r.ladder, s.size_bytes DESC"
@@ -1290,7 +1323,11 @@ detector version exists: a change in the detectors and a change in the estate
 move the same numbers, and the version beside each snapshot is what separates
 them. `rows_outside_a_recorded_run` names rows whose snapshot no run row accounts
 for — normally empty, and never folded into a total that would read as if they
-carried a version and a time.
+carried a version and a time. Those rows are outside every `current_` view too:
+with no run row there is no index time to call them current by.
+`current_snapshot_views` lists the views the run declared, so the short query
+that answers for one commit is named in the output of the command that wrote
+the rows.
 
 ## Re-indexing
 
@@ -1308,12 +1345,24 @@ dropped any clause of the key would take rows the run never looked at. What it
 did take is reported as `replaced`.
 
 Snapshots on different commits coexist, which is Orbit's own semantics. A commit
-that moves leaves the previous snapshot's rows in place.
+that moves leaves the previous snapshot's rows in place — which is why the
+`current_` views exist, and why they are declared fresh on every run rather than
+created once: a view holding yesterday's column list is the failure a reader who
+never opens this file would never see.
+
+Current is the most recent index run per repository, ordered on `indexed_at`.
+Two runs land in the same second whenever a script indexes twice in a row, so
+that column keeps the microsecond the clock gave it; `store.snapshots` still
+prints it to the second.
 
 ## Constraints held here
 
 - **Never writes to Orbit's tables.** `store.assert_context_table` refuses any
   table not prefixed `gl_context_`.
+- **No view named like one of Orbit's tables.** `store.assert_local_view`
+  refuses a name beginning `gl_` or `_orbit_`. The name is what makes a query
+  run without `--db` fail instead of answering from the wrong graph, so it is a
+  guard rather than a convention.
 - **No prose columns.** No `summary`, no `purpose`, and no clause text.
 - **Constrained vocabulary** on tool-authored fields — reasons, surface kinds,
   column names, statistics keys. Enforced by `orbit/tests/test_vocabulary.py`,

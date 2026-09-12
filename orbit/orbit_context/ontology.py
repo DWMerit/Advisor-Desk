@@ -33,6 +33,23 @@ _CLICKHOUSE_TO_DUCKDB = {
 
 _WRAPPERS = re.compile(r"^(LowCardinality|Nullable)\((.*)\)$")
 
+# Every table this indexer writes carries this prefix, and every current-snapshot
+# view carries the other. The two prefixes are the whole of the naming rule: a
+# view is the table's name with `gl_context_` traded for `current_`.
+#
+# `current_` is chosen because no graph but this one holds a view by that name.
+# `orbit local sql` run without `--db` reads GitLab Orbit's own store, which
+# holds a `gl_context_surface` of its own, and answers from it without failing.
+# The same query written against `current_surface` cannot answer from the wrong
+# store: it fails, and names the table it could not find.
+STORE_TABLE_PREFIX = "gl_context_"
+CURRENT_VIEW_PREFIX = "current_"
+
+# The snapshot every context row carries: one repository at one commit on one
+# branch. It is the key the store replaces rows on and the key a current-snapshot
+# view joins by, so it is declared here with the tables rather than in either.
+SNAPSHOT_KEY = ("traversal_path", "project_id", "branch", "commit_sha")
+
 
 class OntologyError(Exception):
     """A node YAML file is missing something the indexer needs."""
@@ -81,6 +98,31 @@ class TableShape:
             for column in self.columns
         )
         return f"CREATE TABLE IF NOT EXISTS {self.table} (\n{body}\n)"
+
+    @property
+    def current_view(self) -> str:
+        """The name of this table's current-snapshot view."""
+        return CURRENT_VIEW_PREFIX + self.table.removeprefix(STORE_TABLE_PREFIX)
+
+    def create_current_view_sql(self, snapshot_view: str) -> str:
+        """This table's rows at the snapshot each repository is currently at.
+
+        Declared here, beside the table it scopes, and written as ``t.*`` rather
+        than as a column list. A view that named its columns by hand would be a
+        second place to forget one, and the point of building the table from the
+        ontology is that adding a column there is the only edit.
+
+        The join is an inner join to the snapshot view, so rows whose snapshot no
+        run row accounts for are outside every current view. Those rows carry no
+        index time and no detector version, so there is nothing to call them
+        current by -- ``store.rows_outside_a_recorded_run`` names them instead.
+        """
+        key = ", ".join(SNAPSHOT_KEY)
+        return (
+            f"CREATE OR REPLACE VIEW {self.current_view} AS\n"
+            f"SELECT t.* FROM {self.table} t\n"
+            f"JOIN {snapshot_view} snapshot USING ({key})"
+        )
 
     def add_column_sql(self, name: str) -> str:
         column = next(c for c in self.columns if c.name == name)

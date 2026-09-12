@@ -540,8 +540,17 @@ def _count(result: RepoResult, path: str, reason: str, detail: str, errored: boo
 
 
 def _now() -> datetime:
-    """This run's moment, UTC and naive -- the shape a DuckDB TIMESTAMP holds."""
-    return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+    """This run's moment, UTC and naive -- the shape a DuckDB TIMESTAMP holds.
+
+    Kept at the microsecond the clock gives rather than truncated to the second.
+    Two runs of one repository land in the same second whenever a script indexes
+    twice in a row, and `current_run` orders by this column to decide which
+    snapshot a view answers for. Truncated, the two would tie and the view would
+    answer for whichever the tiebreak happened to reach -- which is the defect
+    the views exist to remove, one layer down. Nothing prints the fraction:
+    `store.snapshots` formats it to the second.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _run_row(node: NodeType, repo: Repository, indexed_root: Path,
@@ -873,6 +882,12 @@ def migrate(db_path: str | Path = store.DEFAULT_DB_PATH,
     connection = store.connect(db_path)
     try:
         report = store.migrate(connection, ontology.tables, remove_values)
+        # The store a reader queries next is this one, so its views are brought
+        # to the migrated shape in the same pass. A view left at the old column
+        # list is the failure the migration exists to remove.
+        report["current_snapshot_views"] = store.declare_views(
+            connection, ontology.tables
+        )
     finally:
         connection.close()
     report["database_path"] = str(Path(db_path))
@@ -910,6 +925,11 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
         # whose shape it just called into question, and the counts it prints
         # cannot be compared with the run before it. See store.SchemaDrift.
         store.assert_matches_ontology(connection, ontology.tables, Path(db_path))
+        # Declared on every run, before the rows are written. A reader who never
+        # opens the README asks `SELECT count(*) FROM current_surface` and gets
+        # the snapshot that exists; the base tables are still there for the
+        # deliberate question about several runs at once.
+        views = store.declare_views(connection, ontology.tables)
         for repo_root in repo_roots:
             nested = [other for other in repo_roots
                       if other != repo_root and repo_root in other.parents]
@@ -991,6 +1011,10 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                 1 for entry in held if not entry["detector_set_is_current"]
             ),
             "rows_outside_a_recorded_run": unaccounted,
+            # The short query that answers for one commit, named in the output
+            # of the command that just wrote the rows. `current_run` says which
+            # snapshot, and how many runs the store holds beside it.
+            "current_snapshot_views": views,
         },
         "repositories": [
             {
