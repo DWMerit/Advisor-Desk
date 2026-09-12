@@ -15,7 +15,7 @@ from . import ladders as ladder_module
 from . import ontology as ontology_module
 from . import pointers as pointer_module
 from . import provenance as provenance_module
-from . import store, surfaces
+from . import clients, store, surfaces
 from .ontology import EdgeType, NodeType, OntologyError
 from .workspace import (
     LOCAL_TRAVERSAL_PATH,
@@ -79,6 +79,7 @@ class RepoResult:
     # statement about a file and the third is this tool's reading of a
     # directory, and a total says which is which about none of them.
     recognition: dict = field(default_factory=dict)
+    client: dict = field(default_factory=dict)
     # The ladders found, and the rungs that could not be attached to one.
     # Reported together for the reason the pair count is reported beside its
     # provenance: a ladder count on its own cannot say what it missed.
@@ -138,6 +139,7 @@ def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
         repo.project_id, repo.branch, repo.commit_sha, detected.relative_path,
         detected.kind, detected.start_offset,
     )
+    client, client_reason = clients.attribute(detected.relative_path)
     values = {
         "id": stable_id(*("" if part is None else part for part in identity)),
         "traversal_path": LOCAL_TRAVERSAL_PATH,
@@ -148,6 +150,12 @@ def _row(node: NodeType, repo: Repository, detected: surfaces.Detected) -> dict:
         "name": detected.name,
         "surface_kind": detected.kind,
         "recognition": detected.recognition,
+        # Which assistant's own naming claims this surface, and what that value
+        # rests on. Derived from the path alone -- nothing is opened for it, so
+        # a surface that failed to index is attributed on the same evidence as
+        # one that read cleanly.
+        "client": client,
+        "client_reason": client_reason,
         # A node listed without its bytes has no digest of its own, and taking
         # one would follow the link and hash the file it names -- filing one
         # file's bytes under two paths and inventing a byte-identical pair the
@@ -726,6 +734,7 @@ def index_repository(connection, ontology: ontology_module.Ontology, repo: Repos
 
     result.ladders = _ladder_tally(rung_rows, rungs_without_a_base)
     result.recognition = _recognition_tally(rows.values())
+    result.client = _client_tally(rows.values())
     result.files_walked = len(walked)
     result.bytes_walked = surfaces.bytes_walked(walked)
     # Distinct paths, not rows. A settings file is one file however many hooks
@@ -800,6 +809,29 @@ def _recognition_tally(rows) -> dict:
     return tally
 
 
+def _client_tally(rows) -> dict:
+    """Surfaces per client, UNKNOWN among them and never omitted.
+
+    Every value present even at zero, for the reason ``_recognition_tally``
+    gives -- and UNKNOWN most of all. A repository whose surfaces nothing names
+    and a repository the derivation was never run against read the same if the
+    key is simply absent, and a count of attributed surfaces printed without its
+    UNKNOWN bucket is a cold-start bill with two-thirds of the estate left off
+    it.
+
+    Counted over rows that indexed, which is what ``surfaces`` beside it counts,
+    so the split sums to the total it is printed next to.
+    """
+    tally = {value: 0 for value in clients.CLIENT_KINDS}
+    for row in rows:
+        if row.get("reason"):
+            continue
+        value = row.get("client")
+        if value in tally:
+            tally[value] += 1
+    return tally
+
+
 def _ladder_totals(results: list[RepoResult]) -> dict:
     """The same tally across every repository this run indexed.
 
@@ -828,6 +860,14 @@ def _recognition_totals(results: list[RepoResult]) -> dict:
     return {
         value: sum(result.recognition.get(value, 0) for result in results)
         for value in surfaces.RECOGNITION_KINDS
+    }
+
+
+def _client_totals(results: list[RepoResult]) -> dict:
+    """The same tally across every repository this run indexed."""
+    return {
+        value: sum(result.client.get(value, 0) for result in results)
+        for value in clients.CLIENT_KINDS
     }
 
 
@@ -980,6 +1020,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
             "repositories": len(results),
             "surfaces": sum(result.surfaces for result in results),
             "recognition": _recognition_totals(results),
+            "client": _client_totals(results),
             "clauses": sum(result.clauses for result in results),
             "edges": sum(result.edges for result in results),
             "pointers": sum(result.pointers for result in results),
@@ -1026,6 +1067,7 @@ def index(path: str | Path, db_path: str | Path = store.DEFAULT_DB_PATH,
                 "graph": {
                     "surfaces": result.surfaces,
                     "recognition": dict(result.recognition),
+                    "client": dict(result.client),
                     "clauses": result.clauses,
                     "edges": result.edges,
                     "pointers": result.pointers,

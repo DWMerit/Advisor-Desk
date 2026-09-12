@@ -11,7 +11,7 @@ node_type: Surface
 domain: context
 description: Something that can place text into an assistant session -- a file, or an entry inside one
 label: path
-default_columns: [id, path, name, surface_kind, recognition, size_bytes, commit_sha]
+default_columns: [id, path, name, surface_kind, recognition, client, size_bytes, commit_sha]
 destination_table: gl_context_surface
 sort_key: [traversal_path, project_id, branch, id]
 
@@ -98,6 +98,37 @@ properties:
       and is the one value here that is inferred rather than declared. Recorded
       as its own column so a query can exclude what was inferred, which a count
       that folded the three together could not."
+    selectivity: low
+
+  client:
+    type: string
+    source: client
+    nullable: false
+    mutable: false
+    description: "Which assistant's own naming convention claims this surface:
+      claude | codex | gemini | cursor | copilot | UNKNOWN. Read from the
+      estate's own naming and nothing else -- a filename a vendor defined, or a
+      directory a vendor defined, is a statement the estate made when it wrote
+      that name. Nothing is opened to decide it and the pointer graph is not
+      walked for it: reachability carries no load attribution, measured in
+      ticket 07. UNKNOWN is a value and never an empty string, because a
+      surface nothing names is an unmeasured cost rather than a zero one, and
+      two-thirds of this estate's surface bytes carry it. What the value rests
+      on is in `client_reason` beside it."
+    selectivity: low
+
+  client_reason:
+    type: string
+    source: client_reason
+    nullable: false
+    mutable: false
+    description: "Why this row carries the client it carries:
+      a-path-this-vendor-defined | a-directory-this-vendor-defined |
+      a-filename-this-vendor-defined | no-vendor-convention-names-this-surface.
+      A column beside the value rather than a prefix folded into it: folding it
+      in would split the UNKNOWN bucket of a count grouped by `client` across
+      one value per reason, and a single UNKNOWN bucket that prints its own
+      size is what the column is for."
     selectivity: low
 
   content_sha256:
@@ -209,6 +240,8 @@ storage:
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: surface_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: recognition, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: client, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: client_reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: content_sha256, type: "String", codec: ["ZSTD(1)"]}
     - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: frontmatter_bytes, type: "Int64", codec: ["T64", "ZSTD(1)"]}
