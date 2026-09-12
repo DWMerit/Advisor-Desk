@@ -439,9 +439,9 @@ class TestTheViewsAreDeclaredByEveryPathIntoTheStore(SnapshotTestCase):
         # declare, which is the only column this test can add.
         connection = store.connect(self.db)
         try:
-            connection.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
+            connection.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
             store.declare_views(connection, load().tables)
-            self.assertIn("client", store.existing_columns(connection, "current_surface"))
+            self.assertIn("activation", store.existing_columns(connection, "current_surface"))
         finally:
             connection.close()
 

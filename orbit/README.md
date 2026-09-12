@@ -389,6 +389,68 @@ A `SKILL.md` or an agent file that declares no `name` and `description` is not
 one. It is reported in the statistics as `frontmatter_declaration_absent`, so
 that a file which is present but not a skill does not read as absent.
 
+## Which client pays for a surface
+
+`client` says which assistant's own naming convention claims a row, and
+`client_reason` says what that value rests on. Together they are the fact that
+turns a byte count into a bill: two files of 17,294 bytes each, byte-identical,
+is 17,294 bytes of burden or 34,588 depending entirely on whether one client
+loads both.
+
+```sh
+orbit local sql --db ~/.orbit-context/context.duckdb \
+  "SELECT client, count(*), sum(size_bytes) FROM current_surface GROUP BY 1 ORDER BY 2 DESC"
+```
+
+| `client` | Named by |
+|---|---|
+| `claude` | basename `CLAUDE.md` or `SKILL.md`; path `.mcp.json`; anything under `.claude/` |
+| `codex` | basename `AGENTS.md` |
+| `gemini` | basename `GEMINI.md` |
+| `cursor` | basename `.cursorrules`; anything under `.cursor/` |
+| `copilot` | path `.github/copilot-instructions.md` or `.vscode/mcp.json` |
+| `UNKNOWN` | nothing above names it |
+
+The rules are applied in one order — exact path, then directory prefix, then
+basename — which is `surfaces.classify`'s own order, so the rule that decides
+*whether* a path is vendor-named and the rule that decides *which vendor* cannot
+disagree about which of the three matched. `client_reason` names which one did:
+`a-path-this-vendor-defined`, `a-directory-this-vendor-defined`,
+`a-filename-this-vendor-defined`, or `no-vendor-convention-names-this-surface`.
+
+**Nothing is opened, and the pointer graph is not walked.** A name is readable
+without reading the file, so a surface that failed to index — invalid bytes,
+over the size ceiling, a symlink listed and never opened — is attributed on the
+same evidence as one that read cleanly. Reachability was tried in ticket 07 and
+added one row in each of two repositories and none in either lineage repository:
+it does not carry load attribution.
+
+**UNKNOWN is a value, never an empty string and never a guess**, and it is the
+largest bucket in this estate by some distance. A surface nothing names is an
+unmeasured cost rather than a zero one, so the tally prints the bucket even
+where it is empty — the same rule the recognition split follows, and for the
+same reason.
+
+**A client is only ever read off a vendor's own name.** A row recognised by the
+heading it opens with, or by the corpus its directory makes, carries UNKNOWN
+however obvious its client looks: those two recognitions are statements about
+*what a file is*, not about who reads it, and filling the column from them would
+be recording inference as fact.
+
+### The column is outside the detector set, on purpose
+
+`detectors.DETECTOR_MODULES` hashes the five modules that decide what is
+*recognised*. This derivation decides what is written about something already
+recognised, so it sits outside that set the way `ontology` does, and the
+detector set version does not move when the tables change. That is what keeps
+every figure in tickets 07 and 14 comparable with figures taken after this
+column landed, and spec 0004 makes it a constraint rather than an observation.
+
+The cost is that a change to the client tables is invisible in the version
+string. What stands in for it is a test: every entry in the three detector-side
+vendor tables has to resolve to a client, so a name added to a detector cannot
+quietly start producing UNKNOWN.
+
 ## Not every surface is a file
 
 A hook definition and an MCP server are entries *inside* a file. Those rows
@@ -1309,7 +1371,12 @@ ticket of its own. It is also the measurement that opened Gate B.
 per repository. `graph`
 counts `repositories`, `surfaces`, `clauses`, `edges` and `pointers`, and reports
 `external_refs` as the three `sub_kind` counts separately, always all three, even
-at zero. `identical_bytes` is the byte-identity, provenance and direction block above,
+at zero. `recognition` and `client` are the two splits of the surface count,
+each reporting every value it can carry even at zero — UNKNOWN among them, so
+that a repository whose surfaces no vendor names and a repository the derivation
+never ran against do not read the same. Both are counted over rows that indexed,
+which is what `surfaces` beside them counts, so each split sums to the total it
+sits next to. `identical_bytes` is the byte-identity, provenance and direction block above,
 present at estate level and per repository, with every key reported even at
 zero — each rung of the ladder, and each of the three reasons a pair carries no
 direction. `produces_edges` counts `PRODUCES` rows and nothing else; each
