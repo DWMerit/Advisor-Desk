@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""Build a throwaway three-repository estate for testing.
+
+Built by script, never committed. A committed fixture would mean nested ``.git``
+directories that every clone and tool then has to special-case.
+
+    python3 orbit/fixtures/build_estate.py            # into a temp dir
+    python3 orbit/fixtures/build_estate.py /some/dir  # into a named dir
+
+Prints the estate root.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+# Byte-identical in both repositories, and under two different names in `alpha`.
+#
+# Three headings deep, so a rule nested under `### Cast-in channel` has to be
+# reached through the whole heading tree. Non-ASCII above it on purpose -- the
+# em dash, the curly quotes and the >= sign each cost more bytes than
+# characters, so a clause addressed by a character offset lands short of its
+# own text and nothing says so.
+SHARED_INSTRUCTIONS = (
+    "# Estimating rules\n"
+    "\n"
+    "Dimensions are millimetres \u2014 the \u201cmm\u201d is written out, never assumed.\n"
+    "\n"
+    "## M6 anchors\n"
+    "\n"
+    "Anchor spacing is stated on the drawing, never assumed.\n"
+    "\n"
+    "### Cast-in channel\n"
+    "\n"
+    "- Spacing is read off the section, not off the elevation.\n"
+    "- Edge distance \u2265 75 mm from the nearest saw cut.\n"
+    "\n"
+    "## Takeoff\n"
+    "\n"
+    "Quantities come from the marked-up set, not from the schedule.\n"
+    "\n"
+    "```sh\n"
+    "orbit-context show 'CLAUDE.md#Estimating rules#Takeoff'\n"
+    "```\n"
+)
+
+# Written into two repositories, byte for byte. A pair is only ever emitted
+# within one repository: two repositories are two snapshots, each with its own
+# branch and commit, so an edge between them would join two things this indexer
+# has not established are the same.
+ORDINARY_DOCUMENTATION = "Not a surface. Named like ordinary documentation.\n"
+
+# Not valid UTF-8, and named like a surface: it must be recorded with a reason
+# rather than silently missed.
+BINARY_SURFACE = b"\xff\xfe\x00\x01rules\x80\x81\x82"
+
+
+# One of every pointer detector, and one of every non-resolution, written the
+# way an estate writes them: a link, a path in backticks, an import, a URL, a
+# path that leaves the repository, a path that is simply not there, a
+# supersession the estate declares, and a path inside a fenced block that is an
+# example rather than an instruction -- flagged, never dropped.
+POINTER_SURFACE = """# Gamma
+
+The instruction surface.
+
+## Pointers this estate writes down
+
+- The anchor rules live in [the anchor skill](.claude/skills/anchor-schedule/SKILL.md).
+- The pre-tool hook is `.claude/hooks/check-anchors.sh`, run before every Bash call.
+- Pricing comes from @docs/price-book.md, pulled in at the top of every session.
+- The published spacing table is [on the web](https://example.invalid/anchors/spacing.html).
+- The beta estate keeps its own instructions at ../beta/AGENTS.md.
+- Older sessions read docs/absent-rules.md, which is not a file in this repository.
+
+## Supersession, as the estate states it
+
+This file supersedes .claude/commands/price-check.md for pricing questions.
+
+## An example, not an instruction
+
+```sh
+orbit-context show 'CLAUDE.md#Gamma#An example, not an instruction'
+```
+"""
+
+COMMAND_WITH_FRONTMATTER = """---
+description: Re-price the marked-up set.
+reads: docs/price-book.md
+---
+
+Re-price the marked-up set against the price book.
+"""
+
+PRICE_BOOK = """# Price book
+
+Rates are per metre, excluding fixings.
+"""
+
+SKILL_WITH_FRONTMATTER = """---
+name: anchor-schedule
+description: Read anchor spacing off the drawing, never off the schedule.
+---
+
+# Anchor schedule
+
+The body. Loads when the skill is invoked, not at boot.
+"""
+
+AGENT_WITH_FRONTMATTER = """---
+name: takeoff-reviewer
+description: Check a takeoff against the marked-up set.
+---
+
+Compare counts to the marked-up set and report the differences.
+"""
+
+# Four hook commands, deliberately covering every way a command can resolve:
+# a script in the tree, the same script reached through $CLAUDE_PROJECT_DIR,
+# a program found on PATH, and a path to a script that is not in the tree.
+SETTINGS_WITH_HOOKS = """{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": ".claude/hooks/check-anchors.sh"},
+          {"type": "command", "command": "jq -r '.tool_input.command'"}
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {"type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/check-anchors.sh"}
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 .claude/hooks/absent.py"}
+        ]
+      }
+    ]
+  },
+  "mcpServers": {
+    "estimating-notes": {"command": "npx", "args": ["-y", "notes-server"]}
+  }
+}
+"""
+
+MCP_JSON = """{
+  "mcpServers": {
+    "drawing-index": {"command": "uvx", "args": ["drawing-index"]}
+  }
+}
+"""
+
+
+# Ticket 05's fixture: byte-identical files with provenance, and byte-identical
+# files without any. The estate has to hold both, because the finding is the
+# pair of counts and never the first one on its own.
+#
+# `build/rules.md` and `dist/rules.md` are the same bytes, and each names its
+# producer in its own header -- with the trailing comment syntax a real header
+# carries, so the parse has something to get wrong.
+GENERATED_RULES = """<!-- Generated by scripts/build_rules.py -- DO NOT EDIT -->
+
+# Anchor rules, published
+
+Spacing is read off the section, not off the elevation.
+"""
+
+# Rung 3 on its own: no header, written only by a literal path in the script.
+GENERATED_TALLY = "anchors: 412\n"
+
+# Rung 1 present but naming nothing, so the strongest rung that names a
+# producer is the manifest. A file that says it was generated without saying by
+# what is evidence of something, and is counted as exactly that.
+GENERATED_NOTES = """<!-- @generated -->
+
+Notes, rebuilt from docs/notes.md.
+"""
+
+# A header naming a producer that is not in the tree. No edge -- an edge needs
+# both ends -- and a count of its own, so a producer named but not found does
+# not read as a producer never named.
+GENERATED_SUMMARY = """<!-- Generated by scripts/absent-build.py -- DO NOT EDIT -->
+
+One line per drawing.
+"""
+
+BUILD_MANIFEST = """{
+  "artifacts": [
+    {"input": "docs/notes.md", "output": "build/notes.md"}
+  ]
+}
+"""
+
+BUILD_SCRIPT = '''#!/usr/bin/env python3
+"""Write the published rules from the workbench copy."""
+
+from pathlib import Path
+
+
+def main():
+    text = Path("docs/notes.md").read_text()
+    Path("build/rules.md").write_text(text)
+    Path("dist/rules.md").write_text(text)
+    Path("build/tally.txt").write_text("anchors: 412")
+'''
+
+
+def _write(path: Path, content: str | bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(content, encoding="utf-8")
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _init_repo(root: Path, branch: str) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "--initial-branch", branch)
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "Fixture")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "fixture estate")
+
+
+def build(destination: str | Path | None = None) -> Path:
+    """Create the estate and return its root."""
+    root = Path(destination) if destination else Path(tempfile.mkdtemp(prefix="orbit-context-estate-"))
+    root.mkdir(parents=True, exist_ok=True)
+
+    alpha = root / "alpha"
+    # Root surface, and a second name for the same bytes — the pair ticket 05
+    # reports as identical bytes.
+    _write(alpha / "CLAUDE.md", SHARED_INSTRUCTIONS)
+    _write(alpha / "AGENTS.md", SHARED_INSTRUCTIONS)
+    _write(alpha / ".github" / "copilot-instructions.md", "# Copilot\nUse the marked-up set.\n")
+    _write(alpha / "docs" / "notes.md", ORDINARY_DOCUMENTATION)
+    _write(alpha / "src" / "takeoff.py", "def total(quantities):\n    return sum(quantities)\n")
+    _write(alpha / "config" / ".cursorrules", BINARY_SURFACE)
+    _build_artifacts(alpha)
+    _init_repo(alpha, "main")
+
+    beta = root / "beta"
+    _write(beta / "AGENTS.md", "# Beta\nOne surface at the root.\n")
+    _write(beta / "GEMINI.md", "# Beta, Gemini\nA second client at the same root.\n")
+    # Nested, path-scoped surface.
+    _write(beta / "packages" / "ui" / "CLAUDE.md", "# UI package\nScoped to this subtree.\n")
+    _write(beta / "packages" / "ui" / "index.js", "export const noop = () => {};\n")
+    # The same bytes as alpha/docs/notes.md, in another repository.
+    _write(beta / "docs" / "notes.md", ORDINARY_DOCUMENTATION)
+    # Pruned: a surface here belongs to a vendored tree, not to this estate.
+    _write(beta / "node_modules" / "pkg" / "CLAUDE.md", "# Vendored\nNot this estate's.\n")
+    _init_repo(beta, "trunk")
+
+    _build_gamma(root / "gamma")
+
+    # A directory in the estate that is not a repository at all.
+    _write(root / "loose" / "CLAUDE.md", "# Loose\nOutside any repository.\n")
+
+    return root
+
+
+def _build_artifacts(root: Path) -> None:
+    """Generated artifacts and the three rungs of evidence that explain them."""
+    _write(root / "scripts" / "build_rules.py", BUILD_SCRIPT)
+
+    # One pair of byte-identical files, both naming the producer in a header.
+    _write(root / "build" / "rules.md", GENERATED_RULES)
+    _write(root / "dist" / "rules.md", GENERATED_RULES)
+
+    # Rung 3 alone, and rung 2 under a header that names nothing.
+    _write(root / "build" / "tally.txt", GENERATED_TALLY)
+    _write(root / "build" / "manifest.json", BUILD_MANIFEST)
+    _write(root / "build" / "notes.md", GENERATED_NOTES)
+
+    # A producer the estate names that the tree does not hold.
+    _write(root / "build" / "summary.md", GENERATED_SUMMARY)
+
+    # Two empty files. They are byte-identical to each other and to every other
+    # empty file, which is why they are counted and left out of the pairing.
+    _write(root / "build" / ".gitkeep", "")
+    _write(root / "dist" / ".gitkeep", "")
+
+
+def _build_gamma(root: Path) -> None:
+    """One of every governance object, so all surface kinds appear at once."""
+    _write(root / "CLAUDE.md", POINTER_SURFACE)
+
+    # Named by a frontmatter field and by an import, and not a governance
+    # surface itself -- so a pointer to it is an edge to Orbit's own File.
+    _write(root / "docs" / "price-book.md", PRICE_BOOK)
+
+    # skill-package: a directory holding SKILL.md, declaring name and
+    # description. The frontmatter loads at boot; the body only on invocation,
+    # which is why the two are measured apart.
+    _write(
+        root / ".claude" / "skills" / "anchor-schedule" / "SKILL.md",
+        SKILL_WITH_FRONTMATTER,
+    )
+    # A SKILL.md that declares neither: present, and not a skill package.
+    _write(
+        root / ".claude" / "skills" / "undeclared" / "SKILL.md",
+        "# Notes\nNo frontmatter at all.\n",
+    )
+
+    # agent-definition, and one that declares nothing.
+    _write(root / ".claude" / "agents" / "takeoff-reviewer.md", AGENT_WITH_FRONTMATTER)
+    _write(root / ".claude" / "agents" / "scratch.md", "Just notes, no frontmatter.\n")
+
+    # command-definition, at the top level and namespaced by a subdirectory.
+    _write(root / ".claude" / "commands" / "price-check.md", COMMAND_WITH_FRONTMATTER)
+    _write(root / ".claude" / "commands" / "takeoff" / "count.md", "Count the symbols.\n")
+
+    # hook-definition, and the script one of them resolves to.
+    _write(root / ".claude" / "settings.json", SETTINGS_WITH_HOOKS)
+    _write(
+        root / ".claude" / "hooks" / "check-anchors.sh",
+        "#!/bin/sh\necho 'anchor spacing is on the drawing'\n",
+    )
+
+    # mcp-config as a file of its own, alongside the servers declared in
+    # settings.json.
+    _write(root / ".mcp.json", MCP_JSON)
+
+    _init_repo(root, "main")
+
+
+if __name__ == "__main__":
+    print(build(sys.argv[1] if len(sys.argv) > 1 else None))

@@ -1,0 +1,227 @@
+# orbit/ontology/nodes/context/surface.yaml
+#
+# Mirrors config/ontology/nodes/source_code/file.yaml from
+# gitlabhq/orbit-knowledge-graph @ 0fe19ac, so this file can be overlaid onto
+# their ontology tree, or contributed upstream, unchanged.
+#
+# The indexer builds the DuckDB table from `storage.columns` below. Adding a
+# column here adds it to the table; no Python changes.
+
+node_type: Surface
+domain: context
+description: Something that can place text into an assistant session -- a file, or an entry inside one
+label: path
+default_columns: [id, path, name, surface_kind, recognition, size_bytes, commit_sha]
+destination_table: gl_context_surface
+sort_key: [traversal_path, project_id, branch, id]
+
+style:
+  size: 24
+  color: "#F59E0B"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_context_surface
+      key_column: id
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Git branch."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    mutable: false
+    description: "Indexed commit SHA."
+
+  path:
+    type: string
+    source: path
+    nullable: false
+    mutable: false
+    description: "Relative path within the repository."
+
+  name:
+    type: string
+    source: name
+    nullable: true
+    mutable: false
+    description: "What the estate calls this surface -- a skill or agent frontmatter name, a slash command name, a hook event name, an MCP server name. NULL where the estate declares none."
+
+  surface_kind:
+    type: string
+    source: surface_kind
+    nullable: false
+    mutable: false
+    description: "instruction-surface | skill-package | agent-definition | command-definition | hook-definition | mcp-config | hook-target."
+    selectivity: low
+
+  recognition:
+    type: string
+    source: recognition
+    nullable: false
+    mutable: false
+    description: "How this surface was recognised: vendor-name | declared-marker
+      | corpus-adjacent. The first two are statements the estate made itself --
+      a filename a vendor defined, or a heading the file opens with.
+      `corpus-adjacent` is not: it is read off the directory the file sits in,
+      and is the one value here that is inferred rather than declared. Recorded
+      as its own column so a query can exclude what was inferred, which a count
+      that folded the three together could not."
+    selectivity: low
+
+  content_sha256:
+    type: string
+    source: content_sha256
+    nullable: false
+    mutable: false
+    description: "SHA-256 of the file's bytes as indexed. Retrieval compares the
+      file against this before slicing: byte offsets recorded against one
+      version of a file are meaningless against another, and returning whatever
+      now sits at those offsets is silently misread rather than merely stale.
+      Empty on a row whose reason is non_regular_file: a symlink is listed as a
+      node and never opened, so it has no bytes of its own to hash, and hashing
+      through the link would file the named file's digest under a second path."
+
+  size_bytes:
+    type: int64
+    source: size_bytes
+    nullable: false
+    mutable: false
+    description: "Bytes of the surface, measured at index time: the file size for a whole-file surface, the size of the entry for a surface that is an entry inside a file."
+
+  frontmatter_bytes:
+    type: int64
+    source: frontmatter_bytes
+    nullable: true
+    mutable: false
+    description: "Bytes of the leading frontmatter block, delimiters included. 0 where the surface has none; NULL where it was not read as text. Recorded apart from the body because a skill's frontmatter loads at boot for every session and its body only on invocation."
+
+  body_bytes:
+    type: int64
+    source: body_bytes
+    nullable: true
+    mutable: false
+    description: "Bytes after the frontmatter block. NULL where the surface was not read as text."
+
+  start_line:
+    type: int64
+    source: start_line
+    nullable: true
+    mutable: false
+    description: "First line of the entry within its file, 1-based. NULL where the surface is the whole file."
+
+  end_line:
+    type: int64
+    source: end_line
+    nullable: true
+    mutable: false
+    description: "Last line of the entry within its file. NULL where the surface is the whole file."
+
+  matcher:
+    type: string
+    source: matcher
+    nullable: true
+    mutable: false
+    description: "The hook's matcher, quoted verbatim from the settings file. NULL where the entry declares no matcher key; empty where it declares an empty one."
+
+  target_path:
+    type: string
+    source: target_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path a hook command resolves to. Empty where it does not resolve inside the tree; NULL for surfaces that are not hook definitions."
+
+  target_resolution:
+    type: string
+    source: target_resolution
+    nullable: true
+    mutable: false
+    description: "in-tree | path-lookup | no-indexed-target-match | unexpanded-variable | unparsable-command. NULL for surfaces that are not hook definitions."
+    selectivity: low
+
+
+  link_target:
+    type: string
+    source: link_target
+    nullable: true
+    mutable: false
+    description: "Repository-relative path this row's own name resolves to, where the row is a symlink whose target is inside this repository. Empty where the row is a link that resolves outside the repository or to nothing, and NULL for a row that is not a link. Read from the link itself, never from the file it names: a name is readable without opening anything, and a symlink is listed as a node and never read. It is here so that two names for one file can be counted once, labelled by the target -- GitLab Orbit's own rule at crates/orbit-local/src/commands/setup.rs:265-271 -- without a later reader having to walk the tree again to find out which two names those were. Note what it is not: same-inode is a stronger statement than the byte identity IDENTICAL_BYTES carries, and it orders nothing that hashing left unordered."
+
+  content:
+    type: string
+    virtual:
+      service: filesystem
+      lookup: file_content
+      depends_on: [project_id, commit_sha, branch, path]
+    nullable: true
+    description: "Raw surface text, resolved from the file at query time. Never stored."
+
+  reason:
+    type: string
+    source: reason
+    nullable: false
+    mutable: true
+    description: "Why the surface was skipped or failed to index (e.g. invalid_utf8, oversize, read_error, non_regular_file). Empty for surfaces indexed successfully. A non_regular_file row is a symlink: it carries the link's own size, no content_sha256 and no clauses, because a symlink is listed as a node and never read."
+    selectivity: low
+
+storage:
+  settings:
+    index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: surface_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: recognition, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: content_sha256, type: "String", codec: ["ZSTD(1)"]}
+    - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+    - {name: frontmatter_bytes, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: body_bytes, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: start_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: end_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: matcher, type: "String", codec: ["ZSTD(1)"]}
+    - {name: target_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: target_resolution, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: link_target, type: "String", codec: ["ZSTD(3)"]}
+    - {name: reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_path, column: path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
+    - {name: idx_path_ngram, column: path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}

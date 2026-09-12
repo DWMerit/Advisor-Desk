@@ -1,0 +1,133 @@
+# orbit/ontology/nodes/context/coverage_note.yaml
+#
+# Mirrors the shape of config/ontology/nodes/source_code/*.yaml from
+# gitlabhq/orbit-knowledge-graph @ 0fe19ac.
+#
+# One row per thing the walk reached, recognised as worth reading, and did not
+# fully index -- with the reason. Spec 0001 adopts their `reason` column on the
+# grounds that coverage is a property of the record and not a footnote;
+# gl_context_surface already honours that for a candidate that became a row
+# carrying its reason, but two populations were still landing in stdout only:
+#
+#   - a candidate that became no row at all, because there was nothing to say a
+#     row about -- a settings file whose JSON did not parse holds hooks that
+#     cannot be located, and guessing at them would be inventing rows
+#   - a file whose frontmatter does not declare it the surface its location
+#     suggests
+#
+# Printed once and thrown away, those read afterwards as surfaces that are not
+# there. Recorded here, a thin map can say which of its zeroes are absences and
+# which are files it could not read.
+#
+# What is deliberately not here: candidates under the indexed root that belong
+# to no git repository. They carry no branch and no commit, so they key to no
+# snapshot; `index` reports them as outside_indexed_repository and they stay in
+# its statistics.
+#
+# It carries no edges, for the same reason IndexRun does not.
+
+node_type: CoverageNote
+domain: context
+description: A file the walk reached and did not fully index, with the reason
+label: path
+default_columns: [id, path, reason, errored]
+destination_table: gl_context_coverage
+sort_key: [traversal_path, project_id, branch, path, reason]
+
+style:
+  size: 10
+  color: "#64748B"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_context_coverage
+      key_column: id
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Git branch."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    mutable: false
+    description: "Indexed commit SHA."
+
+  path:
+    type: string
+    source: path
+    nullable: false
+    mutable: false
+    description: "Repository-relative path of the file. The estate's own words, so the constrained vocabulary does not apply to it."
+
+  reason:
+    type: string
+    source: reason
+    nullable: false
+    mutable: false
+    description: "Why the file did not index fully: invalid_utf8, oversize, read_error, not_a_file, non_regular_file, invalid_json, or frontmatter_declaration_absent. Each names a condition of the file or a limit of this tool, never a defect: frontmatter_declaration_absent says a file in a skills directory does not declare the two fields a skill package declares, which is a statement about what was read and not about what the file ought to be. non_regular_file is a symlink, which is listed as a node and never read -- GitLab Orbit's own rule and their word for it, recorded at crates/orbit-observability/src/indexer/code.rs:152 as \"a symlink -- a node, never parsed\"."
+    selectivity: low
+
+  detail:
+    type: string
+    source: detail
+    nullable: true
+    mutable: false
+    description: "The measurement or system message that produced the reason -- a byte offset, a size, a parser message. Quoted rather than authored, so the constrained vocabulary does not apply to it. Not a prose column: it carries no summary of what the file is or means."
+
+  errored:
+    type: bool
+    source: errored
+    nullable: false
+    mutable: false
+    description: "True where reading failed rather than the file being a kind this tool does not read. Kept apart because they are different findings: a file this tool declines to read is a boundary of the detector set, and a file it could not read is a boundary of the run."
+    selectivity: low
+
+storage:
+  settings:
+    index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: reason, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: detail, type: "String", codec: ["ZSTD(3)"]}
+    - {name: errored, type: "Bool", codec: ["LZ4"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_path, column: path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}

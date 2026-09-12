@@ -1,0 +1,149 @@
+# orbit/ontology/edges/context/rung_of.yaml
+#
+# One edge type, in GitLab's edge format, routed to the same gl_context_edge
+# table as CONTAINS, REFERENCES, IDENTICAL_BYTES and PRODUCES.
+#
+# Progressive disclosure of rules, implemented by hand in this repository
+# before Orbit existed: one book at three sizes, so a session can load the
+# rung its workflow can afford. Fourteen of these ladders, and until this edge
+# they were invisible to the graph -- fourteen sets of three files with no
+# relation between them.
+#
+# **What the row says, and what it does not.** A ladder is read off the
+# filenames: `refactoring/refactoring.mini.md` sits beside
+# `refactoring/refactoring.md`, and the name says which is which. So this edge
+# is a statement about two names in one directory, and about nothing else. It
+# does not say the mini rung was derived from the full one -- spec 0001 s14
+# keeps "whether two identical files are intentionally identical" a permanent
+# UNKNOWN, and a derivation nothing observed would be the same over-read.
+# Where the estate does evidence a derivation, PRODUCES beside these rows
+# carries it, on the same argument that keeps IDENTICAL_BYTES from being read
+# alone.
+#
+# **Which rung a session actually loaded is not here either.** That needs the
+# load ledger, which is Candidate A and still gated (spec 0001 s6). Every
+# command that prints a ladder names it UNKNOWN rather than reporting zero: an
+# unobservable quantity must not improve a number by being unobservable.
+#
+# The naming convention is this repository's, not a standard. What the rule
+# keys on is a table in `surfaces.py`, so a repository naming its rungs
+# differently has no ladders **found** here rather than no ladders.
+
+edge_type: RUNG_OF
+domain: context
+description: One surface's filename carries a rung word beside a surface named by the stem alone -- a relation between two names, not between two contents
+destination_table: gl_context_edge
+
+variants:
+  - from_node: Surface
+    to_node: Surface
+    description: A surface whose filename is the stem of another surface plus a rung word, in the same directory. The edge leaves the rung and enters the base rung, so the base rung is the ladder's address and a ladder is one walk of these edges.
+
+properties:
+  source_id:
+    type: int64
+    source: source_id
+    nullable: false
+    mutable: false
+    description: "id of the row the edge leaves -- the surface whose filename carries the rung word."
+
+  source_kind:
+    type: string
+    source: source_kind
+    nullable: false
+    mutable: false
+    description: "Node type of the source row. Surface here: a rung is a whole file, and a file that is not a surface is not a rung of anything this tool can see."
+    selectivity: low
+
+  relationship_kind:
+    type: string
+    source: relationship_kind
+    nullable: false
+    mutable: false
+    description: "The edge type. RUNG_OF here."
+    selectivity: low
+
+  target_id:
+    type: int64
+    source: target_id
+    nullable: false
+    mutable: false
+    description: "id of the row the edge enters -- the surface named by the stem alone, which is the base rung and the ladder's address."
+
+  target_kind:
+    type: string
+    source: target_kind
+    nullable: false
+    mutable: false
+    description: "Node type of the row the edge enters. Surface here."
+    selectivity: low
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID. A ladder is only ever read within one repository: two repositories are two snapshots, and a rung relation across them would join two things this indexer has not established are the same."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Git branch."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    mutable: false
+    description: "Indexed commit SHA."
+
+  subtype:
+    type: string
+    source: subtype
+    nullable: true
+    mutable: false
+    description: "The rung word the filename carries -- mini | nano. The estate's own word, taken from the name rather than assigned here, which is why a rung word this tool has not observed is a table entry rather than a category. NULL on edge types that carry no detector, CONTAINS among them."
+    selectivity: low
+
+  source_path:
+    type: string
+    source: source_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path of the rung. NULL on edge types that carry no path."
+
+  target_path:
+    type: string
+    source: target_path
+    nullable: true
+    mutable: false
+    description: "Repository-relative path of the base rung. It is the ladder's address: every rung of one ladder carries the same value here, so grouping by it is how a ladder is asked for. NULL on edge types that carry no path."
+
+storage:
+  settings:
+    index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: source_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: source_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: subtype, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: source_path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: target_path, type: "String", codec: ["ZSTD(3)"]}
+  indexes:
+    - {name: idx_rung_target_path, column: target_path, type: "bloom_filter(0.0001)", granularity: 1}
