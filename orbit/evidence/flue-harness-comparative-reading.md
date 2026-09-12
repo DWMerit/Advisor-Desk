@@ -21,17 +21,27 @@ asked for it?*
 
 That question is `client` (issue #12) and it is Gate A's Q1.
 
-### What this reading does not license
+### Where this sits in the order of work
 
-Spec 0003 §10 excludes an agent-facing hot-context system — retrieval or
-hydration that assembles context for an agent — on the ground that it is a
-one-way door with respect to measurement: a mechanism that delivers context
-changes the cold-start cost before the cost has been read.
+An agent-facing context-loading layer — retrieval or hydration that assembles
+context for an agent, at session start or on demand — **is a destination this
+estate is heading for.** Spec 0003 §10 says so in its own words: it "is a later
+layer." What §10 withholds is the order, not the layer, and it gives the reason:
+a mechanism that delivers context changes the cold-start cost before the cost
+has been read, which makes building one ahead of the reading a one-way door.
 
-**Flue is exactly such a mechanism.** Reading it is inside §10; building
-anything shaped like it is outside, until the cold-start figure exists. The
-findings below are therefore recorded as replay lenses and audit probes, in the
-standing spec 0003 §4 gives the Sandcastle material, and not as a design input.
+**Flue is exactly such a mechanism, already built.** That is what makes it worth
+reading now and worth reading again later, for two different purposes:
+
+| | Purpose | When |
+|---|---|---|
+| Now | Replay lenses and audit probes for Gates 1–3, in the standing spec 0003 §4 gives the Sandcastle material | This file |
+| Later | Prior art for the layer itself, once the cold-start figure exists and §10's ordering is satisfied | Not this file |
+
+The findings below are written for the first column. F5 and F7 are the two that
+speak most directly to the second, and each says plainly which figure it is
+waiting on. Nothing here is a design input yet, and saying so is about sequence
+rather than about the destination's merit.
 
 ## Scope, identity and limitations
 
@@ -237,7 +247,8 @@ in that column were not read.
   the declaration half is available without that ownership.
 - **The cold-start figure.** F5 and F7 are both arguments about a cost this
   estate has not measured. Spec 0003 §1.1 wants it read before anything is built
-  that would change it.
+  that would change it — which is the one thing standing between this reading
+  and its second use as prior art for the later layer.
 - **Whether Flue's own estate pays for these choices elsewhere.** A harness that
   refuses at the point of use fails builds that a lenient one completes. Nothing
   here counts that cost, and the repository's own history was not read.
