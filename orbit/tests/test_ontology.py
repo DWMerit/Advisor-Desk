@@ -32,19 +32,24 @@ class TestSurfaceYaml(unittest.TestCase):
         self.assertTrue(self.node.table.startswith("gl_context_"))
 
     def test_declared_columns(self):
-        # Two additions since phase 1, and this assertion is the reason neither
-        # could be made quietly -- which is what it is for.
+        # Four additions since phase 1, and this assertion is the reason none of
+        # them could be made quietly -- which is what it is for.
         #
         # `recognition`, by ticket 10: recognition stopped being a single rule,
         # so how a surface was found stopped being derivable from the fact that
         # it was found. `link_target`, by ticket 13: where a link's own name
         # resolves, so that two names for one file can be counted once without
         # a later reader walking the tree again to find out which two names
-        # those were. Every other column here is phase 1's.
+        # those were. `client` and `client_reason`, by spec 0004: which
+        # assistant's own naming claims the surface, and what that value rests
+        # on -- the fact that turns a byte count into a bill, and the one
+        # Candidate A column any question asked for. Every other column here is
+        # phase 1's.
         self.assertEqual(
             self.node.column_names,
             ("id", "traversal_path", "project_id", "branch", "commit_sha",
-             "path", "name", "surface_kind", "recognition", "content_sha256",
+             "path", "name", "surface_kind", "recognition", "client",
+             "client_reason", "content_sha256",
              "size_bytes", "frontmatter_bytes",
              "body_bytes", "start_line", "end_line", "matcher", "target_path",
              "target_resolution", "link_target", "reason"),
@@ -59,8 +64,12 @@ class TestSurfaceYaml(unittest.TestCase):
         for banned in ("summary", "purpose", "description_text", "notes"):
             self.assertNotIn(banned, self.node.column_names)
 
-    def test_gated_columns_are_absent_in_phase_one(self):
-        for gated in ("client", "activation", "revocable", "evidence_class", "detector"):
+    def test_the_columns_still_behind_a_gate_are_absent(self):
+        # `client` was on this list and is not any more: spec 0004 built it, and
+        # Gate A's three questions were re-run against it. The other four are
+        # Candidate A's remaining columns, and none of them is built -- not
+        # because they failed, but because no question has asked for one.
+        for gated in ("activation", "revocable", "evidence_class", "detector"):
             self.assertNotIn(gated, self.node.column_names)
 
 
@@ -88,17 +97,17 @@ class TestAddingAColumn(unittest.TestCase):
         node = load_domain(self.ontology)["Surface"]
         connection = store.connect(db)
         store.reconcile(connection, node)
-        self.assertNotIn("client", store.existing_columns(connection, node.table))
+        self.assertNotIn("activation", store.existing_columns(connection, node.table))
         connection.close()
 
-        self._add_column("client")
+        self._add_column("activation")
 
         node = load_domain(self.ontology)["Surface"]
-        self.assertIn("client", node.column_names)
+        self.assertIn("activation", node.column_names)
         connection = store.connect(db)
         outcome = store.reconcile(connection, node)
-        self.assertEqual(outcome["columns_added"], ["client"])
-        self.assertIn("client", store.existing_columns(connection, node.table))
+        self.assertEqual(outcome["columns_added"], ["activation"])
+        self.assertIn("activation", store.existing_columns(connection, node.table))
         connection.close()
 
     def test_unmapped_storage_type_is_rejected(self):

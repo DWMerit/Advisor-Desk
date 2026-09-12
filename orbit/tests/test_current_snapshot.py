@@ -44,7 +44,7 @@ from orbit_context.ontology import load
 # which rows an answer covers; the five hashed detector modules decide what is
 # recognised, and this work touches none of them. Asserted rather than stated in
 # prose: a figure moving after this date is not attributable to this change.
-DETECTOR_SET_VERSION = "1.8eabab386316"
+DETECTOR_SET_VERSION = support.DETECTOR_SET_VERSION
 
 
 class SnapshotTestCase(unittest.TestCase):
@@ -439,9 +439,9 @@ class TestTheViewsAreDeclaredByEveryPathIntoTheStore(SnapshotTestCase):
         # declare, which is the only column this test can add.
         connection = store.connect(self.db)
         try:
-            connection.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
+            connection.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
             store.declare_views(connection, load().tables)
-            self.assertIn("client", store.existing_columns(connection, "current_surface"))
+            self.assertIn("activation", store.existing_columns(connection, "current_surface"))
         finally:
             connection.close()
 

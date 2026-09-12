@@ -82,7 +82,7 @@ class TestDriftFailsTheRun(StoreTestCase):
         super().setUp()
         self.estate = build(self.tmp / "estate")
         index(self.estate, db_path=self.db)
-        self.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
+        self.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
 
     def test_the_run_fails(self):
         with self.assertRaises(store.SchemaDrift):
@@ -92,7 +92,7 @@ class TestDriftFailsTheRun(StoreTestCase):
         with self.assertRaises(store.SchemaDrift) as raised:
             index(self.estate, db_path=self.db)
         self.assertIn("gl_context_surface", str(raised.exception))
-        self.assertIn("client", str(raised.exception))
+        self.assertIn("activation", str(raised.exception))
 
     def test_the_failure_names_the_remedy(self):
         with self.assertRaises(store.SchemaDrift) as raised:
@@ -112,7 +112,7 @@ class TestDriftFailsTheRun(StoreTestCase):
         with contextlib.redirect_stderr(stderr):
             code = cli.main(["index", str(self.estate), "--db", str(self.db)])
         self.assertEqual(code, 1)
-        self.assertIn("client", stderr.getvalue())
+        self.assertIn("activation", stderr.getvalue())
         self.assertIn("orbit-context migrate", stderr.getvalue())
 
 
@@ -123,42 +123,47 @@ class TestMigrateRemovesWhatTheOntologyDoesNotDeclare(StoreTestCase):
         index(self.estate, db_path=self.db)
 
     def test_an_undeclared_column_is_removed(self):
-        self.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
+        self.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
         report = migrate(self.db)
         removed = {entry["table"]: entry["columns_removed"] for entry in report["tables"]}
-        self.assertEqual(removed["gl_context_surface"], ["client"])
+        self.assertEqual(removed["gl_context_surface"], ["activation"])
         self.assertNotIn(
-            "client",
+            "activation",
             store.existing_columns(store.connect(self.db, read_only=True),
                                    "gl_context_surface"),
         )
 
-    def test_the_four_pre_gate_columns_are_removed_together(self):
-        for column in ("client", "activation", "evidence_class", "detector"):
+    def test_the_four_columns_still_behind_a_gate_are_removed_together(self):
+        # Candidate A's remaining columns. `client` stood at the head of this
+        # list until spec 0004 built it, and `revocable` takes its place rather
+        # than the case shrinking to three -- what is tested here is several
+        # columns going in one migration, not which four they happen to be.
+        gated = ("activation", "revocable", "evidence_class", "detector")
+        for column in gated:
             self.execute(f"ALTER TABLE gl_context_surface ADD COLUMN {column} VARCHAR")
         migrate(self.db)
         columns = store.existing_columns(
             store.connect(self.db, read_only=True), "gl_context_surface"
         )
-        for column in ("client", "activation", "evidence_class", "detector"):
+        for column in gated:
             self.assertNotIn(column, columns)
 
     def test_no_count_moves_across_the_migration(self):
         # The ticket's own guard. Those columns carry no count; if a number
         # moves, something else changed at the same time.
-        self.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
+        self.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
         before = self.counts()
         migrate(self.db)
         self.assertEqual(self.counts(), before)
 
     def test_the_report_carries_the_counts_either_side(self):
-        self.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
+        self.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
         report = migrate(self.db)
         for entry in report["tables"]:
             self.assertEqual(entry["rows_before"], entry["rows_after"], entry["table"])
 
     def test_indexing_runs_again_once_migrated(self):
-        self.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
+        self.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
         migrate(self.db)
         statistics = index(self.estate, db_path=self.db)
         self.assertGreater(statistics["graph"]["surfaces"], 0)
@@ -195,12 +200,12 @@ class TestMigrateRemovesWhatTheOntologyDoesNotDeclare(StoreTestCase):
         self.assertEqual(self.counts(), before)
 
     def test_the_cli_migrates(self):
-        self.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
+        self.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             code = cli.main(["migrate", "--db", str(self.db)])
         self.assertEqual(code, 0)
-        self.assertIn("client", stdout.getvalue())
+        self.assertIn("activation", stdout.getvalue())
 
 
 class TestMigrateRefusesAColumnHoldingValues(StoreTestCase):
@@ -216,9 +221,9 @@ class TestMigrateRefusesAColumnHoldingValues(StoreTestCase):
         super().setUp()
         self.estate = build(self.tmp / "estate")
         index(self.estate, db_path=self.db)
-        self.execute("ALTER TABLE gl_context_surface ADD COLUMN client VARCHAR")
         self.execute("ALTER TABLE gl_context_surface ADD COLUMN activation VARCHAR")
-        self.execute("UPDATE gl_context_surface SET client = 'a-session' "
+        self.execute("ALTER TABLE gl_context_surface ADD COLUMN revocable VARCHAR")
+        self.execute("UPDATE gl_context_surface SET activation = 'a-trigger' "
                      "WHERE path = 'CLAUDE.md'")
 
     def test_the_migration_is_refused(self):
@@ -244,9 +249,10 @@ class TestMigrateRefusesAColumnHoldingValues(StoreTestCase):
         report = migrate(self.db, remove_values=True)
         removed = {entry["table"]: entry for entry in report["tables"]}
         surface = removed["gl_context_surface"]
-        self.assertEqual(sorted(surface["columns_removed"]), ["activation", "client"])
-        self.assertGreater(surface["values_removed"]["client"], 0)
-        self.assertNotIn("activation", surface["values_removed"])
+        self.assertEqual(sorted(surface["columns_removed"]),
+                         ["activation", "revocable"])
+        self.assertGreater(surface["values_removed"]["activation"], 0)
+        self.assertNotIn("revocable", surface["values_removed"])
         # The rows themselves stay. It is the column that goes.
         self.assertEqual(self.sql("SELECT count(*) FROM gl_context_surface")[0][0], rows)
 
@@ -256,7 +262,7 @@ class TestMigrateRefusesAColumnHoldingValues(StoreTestCase):
             code = cli.main(["migrate", "--db", str(self.db), "--remove-values"])
         self.assertEqual(code, 0)
         self.assertNotIn(
-            "client",
+            "activation",
             store.existing_columns(store.connect(self.db, read_only=True),
                                    "gl_context_surface"),
         )
@@ -265,9 +271,9 @@ class TestMigrateRefusesAColumnHoldingValues(StoreTestCase):
         with self.assertRaises(store.MigrationRefused) as raised:
             migrate(self.db)
         message = str(raised.exception)
-        self.assertIn("gl_context_surface.client", message)
+        self.assertIn("gl_context_surface.activation", message)
         held = self.sql("SELECT count(*) FROM gl_context_surface "
-                        "WHERE client IS NOT NULL")[0][0]
+                        "WHERE activation IS NOT NULL")[0][0]
         self.assertGreater(held, 0)
         self.assertIn(str(held), message)
 
@@ -277,8 +283,8 @@ class TestMigrateRefusesAColumnHoldingValues(StoreTestCase):
         columns = store.existing_columns(
             store.connect(self.db, read_only=True), "gl_context_surface"
         )
-        self.assertIn("client", columns)
         self.assertIn("activation", columns)
+        self.assertIn("revocable", columns)
 
 
 class TestTheStoreContentsAreVisible(StoreTestCase):

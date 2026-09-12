@@ -45,11 +45,15 @@ Work lives as GitHub issues on `DWMerit/Advisor-Desk`. The roadmap is a
 wayfinder map — the issue labelled `wayfinder:map` — and its child issues are
 the open questions and build tickets.
 
-**An issue's state is open or closed, and that is the only place work state
-lives.** No file in this repository records whether something is done. A
-`## Acceptance` block, a status line, a table of tickets and an index of phases
-are all prose, and prose here has been superseded three and four times over
-while reading exactly as though it were current.
+**An issue's state — open or closed — says whether the work is done. Whether it
+has landed on `main` is a different question, and git answers that one.** A
+closed issue whose branch is unmerged is both: done, and not yet landed. Neither
+source substitutes for the other.
+
+**No file in this repository records either.** A `## Acceptance` block, a status
+line, a table of tickets and an index of phases are all prose, and prose here
+has been superseded three and four times over while reading exactly as though it
+were current.
 
 `docs/agents/issue-tracker.md` says how to reach the tracker from a local
 machine and from a remote session, and which operations need the REST API
