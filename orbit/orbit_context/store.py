@@ -18,7 +18,7 @@ from pathlib import Path
 
 import duckdb
 
-from .ontology import TableShape
+from .ontology import SNAPSHOT_KEY, TableShape
 
 DEFAULT_DB_PATH = Path(os.path.expanduser("~/.orbit-context/context.duckdb"))
 
@@ -285,11 +285,87 @@ def migrate(connection, shapes, remove_values: bool = False) -> dict:
     return {"tables": report}
 
 
-# The snapshot every context row carries. One repository at one commit on one
-# branch, which is what a run row records and what `replace_rows` replaces.
-SNAPSHOT_KEY = ("traversal_path", "project_id", "branch", "commit_sha")
+# `SNAPSHOT_KEY` -- one repository at one commit on one branch -- is imported
+# from the ontology, where it is declared beside the tables that carry it. It is
+# what `replace_rows` replaces on and what a current-snapshot view joins by, and
+# one spelling of it keeps those two from drifting apart.
 
 RUN_TABLE = "gl_context_run"
+
+# The view naming the snapshot each repository is currently at. Every other
+# current view joins to it, and it is the one a reader asks which snapshot an
+# answer came from.
+SNAPSHOT_VIEW = "current_run"
+
+
+def assert_local_view(name: str) -> None:
+    """Refuse a view name another graph could hold.
+
+    The name is the mitigation, not a convenience. ``orbit local sql`` without
+    ``--db`` reads GitLab Orbit's own store, finds a ``gl_context_surface``
+    there, and answers ``3`` rather than failing -- and a plausible small number
+    is the worst kind of wrong answer, because nothing about it looks wrong. A
+    view named outside their prefixes cannot be found in their graph, so the
+    same query fails there and says which table it could not find.
+    """
+    for prefix in ORBIT_OWNED_PREFIXES:
+        if name.startswith(prefix):
+            raise StoreError(
+                f"refusing to declare a view named {name!r}: a name beginning "
+                f"{prefix!r} is one Orbit's own graph could hold, and a query "
+                f"against it run without --db would answer from that graph "
+                f"instead of failing"
+            )
+
+
+def snapshot_view_sql() -> str:
+    """The snapshot each repository is currently at, one row per repository.
+
+    Current is the most recent index run, per repository rather than per store:
+    a store holds several repositories by design, and one global newest would
+    answer for whichever was indexed last and return nothing for the others.
+
+    ``runs_in_store`` rides along because how many runs the store holds is the
+    whole question behind an unscoped figure: a repository sitting on one run
+    reads the same either way, and one sitting on eight does not.
+
+    Written as ``r.*`` with the ordering column excluded again, so a column added
+    to the run table appears here without a second edit.
+    """
+    repository = "r.traversal_path, r.project_id"
+    return (
+        f"CREATE OR REPLACE VIEW {SNAPSHOT_VIEW} AS\n"
+        f"SELECT * EXCLUDE (recency) FROM (\n"
+        f"  SELECT r.*,\n"
+        f"         count(*) OVER (PARTITION BY {repository}) AS runs_in_store,\n"
+        f"         row_number() OVER (PARTITION BY {repository}\n"
+        f"                            ORDER BY r.indexed_at DESC,\n"
+        f"                                     r.commit_sha DESC, r.branch DESC)\n"
+        f"           AS recency\n"
+        f"    FROM {RUN_TABLE} r\n"
+        f") WHERE recency = 1"
+    )
+
+
+def declare_views(connection, shapes) -> list[str]:
+    """Declare a current-snapshot view over every table. Returns their names.
+
+    Replaced rather than created-if-absent, on every run, because a view holding
+    yesterday's column list is the failure this is meant to remove: a reader who
+    never opens the README still gets an answer, so the answer has to be right
+    without anyone having remembered to refresh it.
+    """
+    shapes = list(shapes)
+    assert_local_view(SNAPSHOT_VIEW)
+    connection.execute(snapshot_view_sql())
+    declared = [SNAPSHOT_VIEW]
+    for shape in shapes:
+        if shape.table == RUN_TABLE:
+            continue
+        assert_local_view(shape.current_view)
+        connection.execute(shape.create_current_view_sql(SNAPSHOT_VIEW))
+        declared.append(shape.current_view)
+    return sorted(declared)
 
 
 def _snapshot_counts(connection, table: str) -> dict[tuple, int]:
