@@ -160,12 +160,13 @@ class TestVocabulary(unittest.TestCase):
                 self.assertEqual(offending_words(column), [], column)
 
     def test_current_snapshot_view_names(self):
-        # The names a reader types, and the column the snapshot view adds. Both
-        # are this tool's own words rather than the estate's.
+        # The names a reader types, and the columns the snapshot view adds. All
+        # of them are this tool's own words rather than the estate's.
         for shape in load().tables:
             self.assertEqual(offending_words(shape.current_view), [],
                              shape.current_view)
-        self.assertEqual(offending_words("runs_in_store"), [])
+        for column in ("runs_of_this_repository", "runs_in_store"):
+            self.assertEqual(offending_words(column), [], column)
 
     def test_edge_and_variant_names(self):
         for edge in load().edges.values():

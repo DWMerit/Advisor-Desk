@@ -198,14 +198,29 @@ class TestTwoRunsOfOneRepository(SnapshotTestCase):
         rows = self.sql("SELECT count(*) FROM current_surface")
         self.assertGreater(rows[0][0], 0)
 
-    def test_the_store_says_how_many_runs_it_holds(self):
+    def test_the_store_says_how_many_runs_are_behind_the_answer(self):
         # User story 7: whether an unscoped figure would have been misleading is
         # readable beside the answer rather than by counting run rows by hand.
+        # Two figures, because they answer about different things: what an
+        # unscoped count of this repository's rows would have summed, and what
+        # the file holds altogether.
         held = self.sql(
-            "SELECT runs_in_store FROM current_run WHERE project_id = ?",
+            "SELECT runs_of_this_repository, runs_in_store FROM current_run "
+            "WHERE project_id = ?",
             [self.project_id],
         )
-        self.assertEqual(held, [(2,)])
+        self.assertEqual(held, [(2, self.count("gl_context_run"))])
+
+    def test_the_two_run_counts_are_different_questions(self):
+        # Three repositories, one of them indexed twice: four run rows, and the
+        # repository that moved has two of them. A single figure could not say
+        # both, and the one a reader needs is the first.
+        rows = self.sql(
+            "SELECT project_id, runs_of_this_repository, runs_in_store "
+            "FROM current_run ORDER BY runs_of_this_repository DESC"
+        )
+        self.assertEqual([row[1] for row in rows], [2, 1, 1])
+        self.assertEqual({row[2] for row in rows}, {4})
 
     def test_every_table_scopes_the_same_way(self):
         for shape in load().tables:
@@ -443,7 +458,21 @@ class TestTheDocumentedQueriesRun(SnapshotTestCase):
     names a table the store does not offer, and a reader has no way to tell the
     two apart from the error. So every documented query is run here against a
     fixture store.
+
+    This class reads live repository content, which the rest of the file does
+    not. The rule it is read against -- spec 0005's *"a test that reads live
+    content fails whenever the content changes"* -- is about live *figures*, and
+    keeps them in evidence records. There is no way to check that the documented
+    queries run without reading the document, the acceptance asks for exactly
+    that check, and `orbit/tests/test_pointers.py` already measures this
+    repository's prose the same way. Every figure asserted here still comes from
+    the fixture estate.
     """
+
+    # A documented query that means to span runs says so in its own first line.
+    # The marker is in the SQL rather than in this file so that the reason is
+    # beside the query, where someone copying it will read it.
+    ACROSS_RUNS = "-- across runs, deliberately"
 
     # The one name in the documented queries that is not this store's. It is
     # GitLab Orbit's own file table, reached through their CLI by ATTACH, and
@@ -463,7 +492,11 @@ class TestTheDocumentedQueriesRun(SnapshotTestCase):
     def documented(self):
         text = (support.ORBIT_ROOT / "README.md").read_text(encoding="utf-8")
         found = self._QUERY.findall(text)
-        self.assertGreater(len(found), 10)
+        self.assertGreater(
+            len(found), 10,
+            "the pattern matched almost nothing, so this class is passing "
+            "without reading the documented queries at all",
+        )
         return found
 
     def test_every_documented_query_runs(self):
@@ -478,23 +511,50 @@ class TestTheDocumentedQueriesRun(SnapshotTestCase):
         # appearing here is a documented query this store cannot answer.
         self.assertEqual(skipped, {self.ANOTHER_GRAPHS_TABLE})
 
+    def test_the_documented_table_of_views_lists_what_the_store_declares(self):
+        """The README pairs each view with its table by hand. Checked, not read.
+
+        `declare_views` derives that pairing; the table restates it. A table
+        added to the ontology gets a view without anyone editing the README, and
+        the row that is then missing is the documentation failing quietly.
+        """
+        text = (support.ORBIT_ROOT / "README.md").read_text(encoding="utf-8")
+        rows = re.findall(r"^\| `(current_[a-z_]+)` \| `(gl_context_[a-z_]+)`",
+                          text, re.MULTILINE)
+        self.assertEqual(
+            {view: table for view, table in rows},
+            {shape.current_view: shape.table for shape in load().tables},
+        )
+
     def test_the_documented_queries_read_the_current_snapshot(self):
         """A documented example is the query a reader copies, so it is scoped.
 
-        The base tables are still the way to ask across runs, and the README
-        says so in prose -- prose is not matched here. What this holds is that
-        the example nobody reads twice before pasting answers for one commit. A
-        cross-run example added deliberately later belongs beside a line saying
-        it is one, and this test is where that exception gets written down.
+        What this holds is that the example nobody reads twice before pasting
+        answers for one commit. The base tables are still the way to ask across
+        runs, and an example that means to is exempt -- by saying so in its own
+        first line, which is the marker above rather than a list kept here.
         """
         for statement in self.documented():
+            if self.ACROSS_RUNS in statement:
+                continue
             with self.subTest(query=statement[:60]):
                 for shape in load().tables:
                     self.assertNotIn(
                         shape.table, statement,
                         f"a documented query reads {shape.table} rather than "
-                        f"{shape.current_view}",
+                        f"{shape.current_view}. If it means to span runs, say so "
+                        f"in its first line: {self.ACROSS_RUNS!r}",
                     )
+
+    def test_asking_across_runs_is_documented_too(self):
+        # Spec 0005 keeps the aggregate possible and makes it the deliberate
+        # query. Deliberate is not the same as undocumented: an example exists,
+        # it runs, and it says in its own first line what it is.
+        across = [statement for statement in self.documented()
+                  if self.ACROSS_RUNS in statement]
+        self.assertEqual(len(across), 1)
+        rows = self.sql(across[0])
+        self.assertEqual(len(rows), 3)
 
 
 class TestTheDetectorSetIsUnmoved(unittest.TestCase):
